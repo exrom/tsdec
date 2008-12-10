@@ -4,25 +4,23 @@
 
 #include <stdio.h>
 #include <stdlib.h>        /* malloc */
-/*#include <unistd.h>*/
 #include <string.h>
 #include <ctype.h>         /* isupper */
-//#include <sys/types.h>
-/*#include <sys/stat.h>*/
-//#include <fcntl.h>
 
-#include "csa_cwldec.h"
 #include "csa.h"
 
-
-#include "FFdecsa_test_testcases.h" /* its code!*/
+#include "FFdecsa_test_testcases.h"
 
 /* definitions */
-#define  THIS_CW	(cwp-gl_cw)
-#define  PCKTSIZE 188
+#define  THIS_CW	            ((gpCWcur-gpCWs)/*/sizeof(cw_t)*/)
+#define  IsPUSIPacket         ((gpBuf[1]&0x40) == 0x40)
+#define  IsEncryptedPacket    ((gpBuf[3]&0x80) == 0x80) 
+#define  GetPacketParity      ((gpBuf[3]&0x40) == 0x40)
+#define  PCKTSIZE             188
+#define  CSA_SELFTEST_ENABLED 1
 
 /* globals */
-static const char *version    = "V0.1.1";
+static const char *version    = "V0.2.0";
 static const char *gProgname  = "TSDEC";
 
 typedef struct
@@ -31,19 +29,20 @@ typedef struct
 	unsigned char cw[8];
 } cw_t;
 
-static cw_t *gl_cw;              /* pointer to all CWs array */
-static cw_t *gl_cwend;           /* pointer to last CW in array */
-static cw_t *cwp;                /* help pointer */
+static cw_t *gpCWs;           /* pointer to all CWs array */
+static cw_t *gpCWlast;        /* pointer to last CW in array */
+static cw_t *gpCWcur;         /* help pointer */
+static int gnCWcnt;           /* number of loaded cws */
+static char gLastParity;
 
-static int gCWcnt;              /* number of cws */
-static int gSynced;            /* synched flag */
-static unsigned long gCurrentPacket;     /* number of current packet in TS stream */
-static FILE *fp;
-static unsigned char pbuf[PCKTSIZE];  /* temp buffer for one TS packet */
-static int fdout = 1;
-static int debug;
+static int gSynced;                    /* synched flag */
+static unsigned long gCurrentPacket;   /* number of current packet in TS stream */
+static unsigned char gpBuf[PCKTSIZE];  /* temp buffer for one TS packet */
+/*static int fdout = 1;*/
+/*static int debug;*/
 static char analyzeflag;
-FILE *      fpOutfile;
+static FILE    *fpInfile;
+static FILE    *fpOutfile;
 
 typedef struct
 {
@@ -55,12 +54,10 @@ typedef struct
 
 pidstat_t      pid[23];		      /* array for pid statistics */
 unsigned char  pidcnt;           /* number of different PIDs found so far */
-unsigned long  packetcnt = 0;    /* total number number TS packets */
 static char gVerboseLevel = 2;
 
 /* prototypes */
 static void use(const char *);
-
 
 
 #define msgDbg(vl, ptxt, ... ) \
@@ -82,63 +79,44 @@ int compare(unsigned char *p1, unsigned char *p2, int n)
 
 static void PerformSelfTest(void)
 {
-   csa_t c;
-   cw_t   cw_cwl;
-   unsigned char  testbuf[PCKTSIZE];
+#ifdef CSA_SELFTEST_ENABLED
+   unsigned char  testbuf[PCKTSIZE], i;
 
-   /**** CWLDEC CSA algo ****/
-   cw_cwl.parity = 1; 
-   memcpy(&(cw_cwl.cw), test_1_key, 8);
-   memcpy(testbuf, test_1_encrypted, PCKTSIZE);
-   cwp=&cw_cwl;
-   csa_reset(1); /* offline: always set the descriptors */
-   csa_SetDescr(1, test_1_key);
-	csa_Decrypt_Cwldec(testbuf);
-   if (!compare(testbuf, test_1_expected, 188)) 
-      msgDbg(2, "CSA (cwldec) self test with testpattern \"test_1\" failed FIXME\n");
+   typedef struct {
+      unsigned char  par;
+      unsigned char  *key;
+      unsigned char  *encrypted;
+      unsigned char  *expected;
+   } testcase_t;
 
-   cw_cwl.parity = 1; 
-   memcpy(&(cw_cwl.cw), test_p_10_0_key, 8);
-   memcpy(testbuf, test_p_10_0_encrypted, PCKTSIZE);
-   cwp=&cw_cwl;
-   csa_reset(1); /* offline: always set the descriptors */
-   csa_SetDescr(1, test_p_10_0_key);
-	csa_Decrypt_Cwldec(testbuf);
-   if (!compare(testbuf, test_p_10_0_expected, 188)) 
-      msgDbg(2, "CSA (cwldec) self test with testpattern \"test_p_10_0\" failed FIXME\n");
+   testcase_t  cases[] =
+   {
+      {1, test_1_key,      test_1_encrypted,       test_1_expected},
+      {0, test_2_key,      test_2_encrypted,       test_2_expected},
+      {0, test_3_key,      test_3_encrypted,       test_3_expected},
+      {0, test_p_10_0_key, test_p_10_0_encrypted,  test_p_10_0_expected},
+      {0, test_p_1_6_key,  test_p_1_6_encrypted,   test_p_1_6_expected}
+   };
+   
+   #define num_cases sizeof(cases)/sizeof(testcase_t)
 
-   /**** VLC project CSA algo ****/
-   csa_SetCW( 0, &c, test_1_key, 1 /* odd */);
-   csa_Decrypt(&c, test_1_encrypted, 188);
-   if (!compare(test_1_encrypted, test_1_expected, 188)) 
-      msgDbg(2, "CSA self test with testpattern \"test_1\" failed FIXME\n");
-
-   csa_SetCW( 0, &c, test_2_key, 0 /* even */);
-   csa_Decrypt(&c, test_2_encrypted, 188);
-   if (!compare(test_2_encrypted, test_2_expected, 188)) 
-      msgDbg(2, "CSA self test with testpattern \"test_2\" failed FIXME\n");
-
-   csa_SetCW( 0, &c, test_3_key, 0 /* even */);
-   csa_Decrypt(&c, test_3_encrypted, 188);
-   if (!compare(test_3_encrypted, test_3_expected, 188)) 
-      msgDbg(2, "CSA self test with testpattern \"test_3\" failed FIXME\n");
-
-   csa_SetCW( 0, &c, test_p_10_0_key, 1 /* odd */);
-   csa_Decrypt(&c, test_p_10_0_encrypted, 188);
-   if (!compare(test_p_10_0_encrypted, test_p_10_0_expected, 188)) 
-      msgDbg(2, "CSA self test with testpattern \"test_p_10_0\" failed FIXME\n");
-   /* CSA vlc:    006C: 55 d3 99 04 04
-      CSA cwldec: 006C: 2c dc 43 d2
-      expected:   006C: a7 ca 32 af
-   */
-   csa_Encrypt(&c, test_p_10_0_expected, 188);
-   if (!compare(test_p_10_0_encrypted, test_p_10_0_expected, 188)) 
-      msgDbg(2, "CSA self test decrypt with testpattern \"test_p_10_0\" failed FIXME\n");
-
-   csa_SetCW( 0, &c, test_p_1_6_key, 1 /* odd */);
-   csa_Decrypt(&c, test_p_1_6_encrypted, 188);
-   if (!compare(test_p_1_6_encrypted, test_p_1_6_expected, 188)) 
-      msgDbg(2, "CSA self test with testpattern \"test_p_1_6\" failed FIXME\n");
+   for(i=0; i<num_cases; i++)
+   {
+      csa_key_set(cases[i].key, cases[i].par);
+      memcpy(testbuf, cases[i].encrypted, PCKTSIZE);
+      csa_decrypt(testbuf);
+      csa_encrypt(testbuf, cases[i].par);
+      csa_decrypt(testbuf);
+      if (!compare(testbuf, cases[i].expected, 188)) 
+      {
+         msgDbg(4, "self test of CSA engine has FAILED! (test case %d)\n", i);
+      }
+      else
+      {
+         msgDbg(4, "self test of CSA engine passed (test case %d)\n", i);
+      }
+   }
+#endif
 }
 
 
@@ -170,7 +148,7 @@ static int filelines(FILE *f)
 static int load_cws(const char *name)
 {
 	long len;
-	int i, line=0;
+	int i, line=0, lastParity=-1;
 	FILE *fpcw;
 	char buf[80];
 
@@ -180,18 +158,18 @@ static int load_cws(const char *name)
 		return 1;
 	}
 	len = filelength(fpcw);
-	gCWcnt = filelines(fpcw);
-	if (gCWcnt < 2) {
-		msgDbg(2, "%s: strange file length: %ld (%d lines).\n", name, len, gCWcnt);
-		if (gCWcnt < 1) return 2;
+	gnCWcnt = filelines(fpcw);
+	if (gnCWcnt < 2) {
+		msgDbg(2, "%s: strange file length: %ld (%d lines).\n", name, len, gnCWcnt);
+		if (gnCWcnt < 1) return 2;
 	}
-	if (!(cwp = (cw_t *)malloc(gCWcnt*sizeof(cw_t)))) {
+	if (!(gpCWcur = (cw_t *)malloc(gnCWcnt*sizeof(cw_t)))) {
       msgDbg(2, "+++ out of memory.\n");
 		return 2;
 	}
-	gl_cw = cwp;
+	gpCWs = gpCWcur;
 	buf[sizeof(buf)-1] = 0;
-	for (i = 0; i < gCWcnt; ++i) {
+	for (i = 0; i < gnCWcnt; ++i) {
 		int a[8], par, k;
 		if (!fgets(buf, sizeof(buf)-1, fpcw)) break;
 		++line;
@@ -203,46 +181,30 @@ static int load_cws(const char *name)
 			msgDbg(2, "+++ line %4d: ignored: %s" , line, buf);
 			continue;
 		}
-		cwp->parity = par;
+		if (lastParity == par)
+			msgDbg(2, "repeated parity in line %4d: %s\n" , line, buf);
+      lastParity = par;
+      gpCWcur->parity = par;
 		for (k = 0; k<8; ++k)
-			cwp->cw[k] = a[k];
-		++cwp;
+			gpCWcur->cw[k] = a[k];
+		++gpCWcur;
 	}
 	fclose(fpcw);
-	msgDbg(2, "\"%s\": %d lines, %d cws loaded.\n", name, gCWcnt, cwp-gl_cw);
-	gCWcnt = cwp-gl_cw;
-	gl_cwend = cwp;
-	if (gCWcnt < 2)
+	msgDbg(2, "\"%s\": %d lines, %d cws loaded.\n", name, gnCWcnt, gpCWcur-gpCWs);
+	gnCWcnt = gpCWcur-gpCWs;
+	gpCWlast = gpCWcur;
+	if (gnCWcnt < 2)
 		return -1;
 	return 0;
 }
 
-int set_csa(int mode)
-{
-	if (mode == 1 || mode == 2) {
-		csa_SetDescr(cwp->parity, cwp->cw);
-		++cwp;
-		if (!gSynced) csaCurrCW = -1;
-	}
-	return 0;
-}
 
-static int next_packet(void)
-{
-	int ret;
-
-   {
-		ret = fread(pbuf, sizeof(pbuf), 1, fp);
-		if (ret == 1) ++gCurrentPacket;
-		return ret;
-	}
-}
-	
-/* search for pusi packet until end of TS is reached */
+/* read a new packet from TS input file and make basic plausibility checking */
 static int read_packet(void)
 {
-   unsigned char  i, ccc, ctsc, cpusi, ccrypted;
+   unsigned char  i, ccc, ctsc, cpusi, ccrypted, cafc;
    unsigned int   cpid;
+	int ret;
    /*
    The first 32 bits of one TS packet:
    8  Sync  47H/01000111                                                                            
@@ -255,32 +217,29 @@ static int read_packet(void)
             00 unencrypted packet; 
             10 encrypted even
             11 encrypted odd
-   2  AFC   Adaption Field Control                                                                  
+   2  AFC   Adaption Field Control
+               1. 01 – no adaptation field, payload only
+               2. 10 – adaptation field only, no payload
+               3. 11 – adaptation field followed by payload
+               4. 00 - RESERVED for future use 
    4  CC    Continuity Counter; counts 0 to 15 sequentially for packets of same PID value
    */
-/*typedef struct
-{
-	int   pid;
-	unsigned char  tsc;
-	unsigned char  cc;
-	unsigned long  count;
-} pidstat_t;
 
-pidstat_t   pids[23];
-*/
-	for (;;) {
-		if (next_packet() != 1)
-			break;
-		if (pbuf[0] == 0x47)
+   ret = fread(gpBuf, sizeof(gpBuf), 1, fpInfile);
+   if (ret == 1)
+   {
+	   gCurrentPacket++;
+
+		if (gpBuf[0] == 0x47)
       {
-         packetcnt++;
-         cpid     = 0x1FFF & (pbuf[1]<<8|pbuf[2]);
-         ccc      = pbuf[3]&0x0F;
-         ctsc     = pbuf[3]>>6;
-         ccrypted = pbuf[3]>>7;
-         cpusi    = pbuf[1]&0x40;
+         cpid     = 0x1FFF & (gpBuf[1]<<8|gpBuf[2]);
+         cpusi    = gpBuf[1]&0x40;
+         ctsc     = gpBuf[3]>>6;
+         ccrypted = gpBuf[3]>>7;
+         cafc     = gpBuf[3]>>4&0x03;
+         ccc      = gpBuf[3]&0x0F;
 
-         msgDbg(6, "current packet: PID:0x%04x  PUSI: %d  TSC:%d CC:%d\n", cpid, cpusi, ctsc, ccc );
+         msgDbg(8, "current packet: PID:0x%04x  PUSI: %d  TSC:%d CC:%d\n", cpid, cpusi, ctsc, ccc );
 
          for (i=0; i<pidcnt; i++)
          {
@@ -290,7 +249,7 @@ pidstat_t   pids[23];
                pid[i].crypted = ccrypted;
                if (((ccc-pid[i].cc)&0x0F) != 1)
                {
-                  msgDbg(2, "TS discontinuity detected. PID: %04x   old CC: %d new CC: %d\n",
+                  msgDbg(2, "TS discontinuity detected. PID: %04x CC %d -> %d. TS corrupt?\n",
                      cpid, pid[i].cc, ccc );
                }
 
@@ -300,8 +259,8 @@ pidstat_t   pids[23];
                      pid[i].crypted,
                      ccrypted,
                      cpid, 
-                     packetcnt, 
-                     (packetcnt-1)*PCKTSIZE);
+                     gCurrentPacket, 
+                     (gCurrentPacket-1)*PCKTSIZE);
                }
                pid[i].crypted = ccrypted;
                pid[i].cc = ccc;
@@ -318,7 +277,7 @@ pidstat_t   pids[23];
                pid[pidcnt].crypted  = ccrypted;
                pid[pidcnt].cc       = ccc;
                pid[pidcnt].count    = 1;
-               msgDbg(4, "New PID found: %04x  TSC: %d CC: %d  packet nr.: %d (0x%08x)\n", cpid, ctsc, ccc, packetcnt, packetcnt*PCKTSIZE);
+               msgDbg(4, "New PID found: %04x  TSC: %d CC: %d  packet nr.: %d (0x%08x)\n", cpid, ctsc, ccc, gCurrentPacket, gCurrentPacket*PCKTSIZE);
                pidcnt++;
             }
             else 
@@ -328,92 +287,27 @@ pidstat_t   pids[23];
          }
          if (cpusi) 
          {
-            msgDbg(4, "PUSI Packet found. PID %04x  TSC: %d CC: %d  packet nr.: %d (0x%08x)\n", cpid, ctsc, ccc, packetcnt, (packetcnt-1)*PCKTSIZE);
-			   return 0;
+            msgDbg(6, "PUSI Packet found. PID %04x  TSC: %d CC: %d  packet nr.: %d (0x%08x)\n", cpid, ctsc, ccc, gCurrentPacket, (gCurrentPacket-1)*PCKTSIZE);
          }
 		}
       else
       {
-         msgDbg(4, "TS sync byte 0x47 not found at packet nr.: %d (0x%08x). TS corrupt?\n", packetcnt+1, packetcnt*PCKTSIZE);
-         exit(1);
+         msgDbg(2, "TS sync byte 0x47 not found at packet nr.: %d (0x%08x). TS corrupt?\n", gCurrentPacket+1, gCurrentPacket*PCKTSIZE);
+         return 2;
       }
 	}
-	msgDbg(2, "end of input file reached. Total number of packets: %d.\n", packetcnt);
-	return 1;
+   else
+   {
+	   /*msgDbg(2, "end of input file reached. Total number of packets: %d.\n", gCurrentPacket);*/
+	   return 1;
+   }
+   return 0;
 }
 
-/*****************************************************************
-   get_sync_for_packet
 
-params:
-cw_t *s        start cw
-cw_t *e        end cw
-int count      numer of pusi packets in TS stream to search for given cws
-
-*****************************************************************/
-static int get_sync_for_packet(cw_t *s, cw_t *e, int count)
-{
-	int i, ret;
-	unsigned char sav[PCKTSIZE];
-
-	msgDbg(2, ">>> Trying to sync ...\n");
-	csaCurrCW = -1;
-	if (s < gl_cw) s = gl_cw;
-	if (e > gl_cwend) e = gl_cwend;
-	for (i = 0; i < count; ++i) {
-      msgDbg(8, "get_sync_for_packet: count=%d\n", count);
-		if (read_packet()) {
-			msgDbg(2, "+++ Could not sync: EOF at pusi packet %d, cw %d.\n", i, THIS_CW);
-			return 1;
-		}
-		memcpy(sav, pbuf, PCKTSIZE);
-		gSynced = 0;
-		cwp = s;
-		while (cwp < e) {
-			csa_SetDescr(cwp->parity, cwp->cw);
-			ret = csa_Decrypt_Cwldec(pbuf);
-			if (ret == 1 || ret == 2) {
-				msgDbg(2, "*** Sync at packet %lu, cw %d, pusi %d, cw='%c'\n"
-				, gCurrentPacket, THIS_CW-1, i, (ret&1)?'o':'e');
-				gSynced = 1;
-/*				fwrite(pbuf, PCKTSIZE, 1, fpOutfile);*/
-				fwrite(pbuf, 1, PCKTSIZE, fpOutfile);
-				/*--cwp;*/
-				return 0;
-			}
-			cwp++;
-			memcpy(pbuf, sav, PCKTSIZE);
-		}
-	}
-	msgDbg(2, "+++ Could not sync: %d pusi packets tested.\n", i);
-	return 1;
-}
-			
-static int run(void)
-{
-   csa_reset(1); /* offline: always set the descriptors */
-	cwp = gl_cw;
-   pidcnt=0; memset(pid, 0,sizeof(pid));
-
-	if (get_sync_for_packet(gl_cw, gl_cwend, 30000)) {
-		return 1;
-	}
-	while (next_packet()==1 && cwp<gl_cwend) {
-		if (csa_Decrypt_Cwldec(pbuf) != -1) {
-			/*write(fpOutfile, pbuf, PCKTSIZE);*/
-/*         fwrite(pbuf, PCKTSIZE, 1, fpOutfile);*/
-         fwrite(pbuf, 1, PCKTSIZE, fpOutfile);
-			continue;
-		}
-		msgDbg(2, "+++ Decryption failed at packet %lu, cw %d.\n", gCurrentPacket, THIS_CW);
-		if (get_sync_for_packet(cwp-1, cwp+100, 30000))
-			return 1;
-	}
-	return 0;
-}
-	
 static int analyze(void)
 {
+   pidcnt=0; memset(pid, 0,sizeof(pid));
    while(!read_packet()) {}
 
    return 0;
@@ -423,10 +317,113 @@ static void printPIDstatistics(void)
 {
    unsigned char i;
 
-   msgDbg(2, "\n%PID statistics summary:\n");
+   msgDbg(2, "%PID statistics summary:\n");
    for (i=0; i<pidcnt; i++)
    {
-      msgDbg(2, "PID: %04x crypted:%d count: %d  (%d%%)\n", pid[i].pid, pid[i].crypted, pid[i].count, 100*(pid[i].count)/packetcnt);
+      msgDbg(2, "PID: %04x crypted:%d count: %d  (%d%%)\n", pid[i].pid, pid[i].crypted, pid[i].count, 100*(pid[i].count)/gCurrentPacket);
+   }
+}
+
+int PacketStartsWithPayload(unsigned char *pBuf)
+{
+   if (memcmp(&pBuf[4], "\x00\x00\x01", 3))
+   {
+      msgDbg(6, "no payload found in PUSI packet after decryption\n");
+      return 0;
+   }
+   else
+   {
+      msgDbg(4, "plausible payload start found in PUSI packet after decryption\n");
+      return 1;
+   }
+}
+
+int decryptTS(void)
+{
+   int par;
+   unsigned char  pBuf[PCKTSIZE];
+
+   gSynced = 0;
+   msgDbg(2, "trying to sync...\n");
+
+   gCurrentPacket = 0;
+   while (!read_packet())
+   {
+      if (IsEncryptedPacket)
+      {
+         if (!gSynced)
+         {
+            if(IsPUSIPacket)
+            {
+               /* now try all CWs with same parity, decrypt packet and have a look at it */
+               for(gpCWcur = gpCWs; gpCWcur <= gpCWlast; gpCWcur++)
+               {
+                  par = GetPacketParity;
+                  if (gpCWcur->parity != par )
+                     continue;
+                  csa_key_set(gpCWcur->cw, gpCWcur->parity);
+                  memcpy(pBuf, gpBuf, PCKTSIZE);
+                  csa_decrypt(pBuf);
+                  if (PacketStartsWithPayload(pBuf))
+                  {
+                     gSynced = 1;
+                     gLastParity = gpCWcur->parity;
+                     msgDbg(2,"sync at packet %lu. now using CW Nr.:%d CWL line:%d %02x %02x %02x %02x %02x %02x %02x %02x\n", gCurrentPacket, THIS_CW, gpCWcur->parity, gpCWcur->cw[0],gpCWcur->cw[1],gpCWcur->cw[2],gpCWcur->cw[3],gpCWcur->cw[4],gpCWcur->cw[5],gpCWcur->cw[6],gpCWcur->cw[7]);
+                     memcpy(gpBuf, pBuf, PCKTSIZE);
+                     break; /* leave gpCWcur at its value */
+                  }
+                  else
+                  {
+                     continue;   /* try next cw */
+                  }
+               }  /* for CWs */
+            }  /* if(IsPUSIPacket) */
+         }  /* if (!gSynced) */
+         else
+         {  /* we are in sync */
+            /* does it make sense to do the PUSI sync check here again?  
+               maybe to skip 'holes' in CWL file to do a re sync */
+            if (GetPacketParity != gLastParity)
+            {
+               /* get next CW */
+               if (gpCWcur < gpCWlast)
+               {
+                  gpCWcur++;
+                  gLastParity = gpCWcur->parity;
+                  msgDbg(4, "parity change at packet %lu now using CW Nr.:%d CWL line:%d %02x %02x %02x %02x %02x %02x %02x %02x\n", gCurrentPacket, THIS_CW, gpCWcur->parity, gpCWcur->cw[0],gpCWcur->cw[1],gpCWcur->cw[2],gpCWcur->cw[3],gpCWcur->cw[4],gpCWcur->cw[5],gpCWcur->cw[6],gpCWcur->cw[7]);
+                  /* if the parity changed, and the next packet has the old parity 
+                     again (A/V muxing issues), the CSA engine still knows it */
+               }
+               else
+               {
+                  msgDbg(2, "no more CWs available for decryption!\n");
+                  /* stop complete process here or continue? */
+               }
+               csa_key_set(gpCWcur->cw, gpCWcur->parity);
+            }  /* if (GetPacketParity != gLastParity) */
+            csa_decrypt(gpBuf);
+         }  /* synced */
+      }  /* if (IsEncryptedPacket) */
+      else
+      {
+         /* not encrypted */
+      }
+      /* write unencrypted and decrypted packets to outfile */
+      if (gSynced) fwrite(gpBuf, 1, PCKTSIZE, fpOutfile);
+   }
+
+   /* no more data from infile */
+   if (gSynced) 
+   {
+      msgDbg(2, "end of TS input file reached. Total number of packets: %d.\n", gCurrentPacket);
+      /* close files */
+      return 0;
+   }
+   else
+   {
+      msgDbg(2, "could not sync CWL to TS, sorry.");
+      /* close files */
+      return 1;
    }
 }
 
@@ -434,6 +431,7 @@ int main(int argc, char **argv)
 {
 	int c, upper, ret;
 	char *p, *cwfile=0, *ofile=0;
+   size_t   len;
 
 	while ((p = *++argv) != 0 && *p++ == '-') {
 		c = *p++;
@@ -459,8 +457,8 @@ int main(int argc, char **argv)
 					use("-v: wrong level.");
 				gVerboseLevel = *p-'0';
 				/*++debug;*/
-            gVerboseLevel>=4 ? debug++ : 0;
-            gVerboseLevel>=6 ? debug++ : 0;
+            /*gVerboseLevel>=4 ? debug++ : 0;
+            gVerboseLevel>=6 ? debug++ : 0;*/
 				break;
 			case 'a':
 				analyzeflag=1;
@@ -480,15 +478,31 @@ int main(int argc, char **argv)
    PerformSelfTest();
 
    /* input file */
-   if (*argv != 0) {
-		/*if (!(fp = fopen(*argv, "rb"))) {*/
-      if( (fopen_s( &fp, *argv, "rb" )) !=0 )
+   if (*argv != 0) 
+   {
+		/*if (!(fpInfile = fopen(*argv, "rb"))) {*/
+      if( (fopen_s( &fpInfile, *argv, "rb" )) !=0 )
       {
 			perror(*argv);
 			exit(0);
 		}
+      else
+      {
+      	fseek(fpInfile, 0, SEEK_END);
+	      len = ftell(fpInfile);
+      	fseek(fpInfile, 0, SEEK_SET);
+         if (len%PCKTSIZE)
+         {
+            msgDbg(2, "size of input file %s (%d) is not multiple of %d! (%d packets and %d garbage). TS file may be corrupt!\n", *argv, len, PCKTSIZE, len/PCKTSIZE, len%PCKTSIZE);
+         }
+      }
 		++argv;
-	} else fp = stdin;
+   } 
+   else 
+   {
+      /* no input file given */
+      fpInfile = stdin;
+   }
 
    if (analyzeflag) 
    {
@@ -497,9 +511,14 @@ int main(int argc, char **argv)
       exit(0);
    }
 
-	if (!cwfile)
-		use("-f cwfile not found.");
+	/* process CWL file */
+   if (!cwfile) use("-f cwfile not found.");
+	if (load_cws(cwfile)) {
+		if (gpCWs) free(gpCWs);
+		use("load_cws() failed.");
+	}
 
+   /* process output file */
 	if (ofile) {
 /*		if ((fdout = creat(ofile, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH)) < 0) */
       if ( fopen_s(&fpOutfile, ofile, "wb") != 0 )
@@ -509,18 +528,16 @@ int main(int argc, char **argv)
 			use(0);
 		}
 	}
-	if (load_cws(cwfile)) {
-		if (gl_cw) free(gl_cw);
-		use("load_cws() failed.");
-	}
-
 	while (*argv) {
 		msgDbg(2, "+++ ignored: %s\n", *argv++);
 	}
 
-	csa_debug = debug;	
-	ret = run();
-	if (gl_cw) free(gl_cw);
+	/*csa_debug = debug;	*/
+
+   /*ret = run();*/
+   ret = decryptTS();
+
+	if (gpCWs) free(gpCWs);
 	return ret;
 }
 
@@ -534,7 +551,7 @@ static void use(const char *txt)
    else
    {
 	   fprintf(stderr, "%s decrypts recorded DVB transport streams (TS) using \na control word log (CWL) file. Based on cwldec-0.0.2\n\n",gProgname);
-	   fprintf(stderr, "usage:\n%s [-f cwlfile] [-v n] [-a] inputfile [-o outputfile]\n\n", gProgname);
+	   fprintf(stderr, "usage:\n%s [-f cwlfile] [-v n] [-a] [-o outputfile] inputfile\n\n", gProgname);
 	   /*fprintf(stderr, "  If no output file is given, write to stdout.\n\n");*/
 	   fprintf(stderr, "    -f cwlfile     use cwlfile to decrypt transport stream\n");
 	   fprintf(stderr, "    inputfile      encrypted recorded transport stream to be decrypted\n");

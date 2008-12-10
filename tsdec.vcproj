@@ -45,7 +45,7 @@
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="3"
-				UsePrecompiledHeader="2"
+				UsePrecompiledHeader="0"
 				WarningLevel="3"
 				DebugInformationFormat="4"
 			/>
@@ -114,10 +114,11 @@
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
+				FavorSizeOrSpeed="1"
 				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE"
 				RuntimeLibrary="2"
 				EnableFunctionLevelLinking="true"
-				UsePrecompiledHeader="2"
+				UsePrecompiledHeader="0"
 				WarningLevel="3"
 				DebugInformationFormat="3"
 			/>
@@ -187,22 +188,6 @@
 				>
 			</File>
 			<File
-				RelativePath=".\csa_cwldec.c"
-				>
-				<FileConfiguration
-					Name="Debug|Win32"
-					>
-					<Tool
-						Name="VCCLCompilerTool"
-						UsePrecompiledHeader="0"
-					/>
-				</FileConfiguration>
-			</File>
-			<File
-				RelativePath=".\csa_cwldec.h"
-				>
-			</File>
-			<File
 				RelativePath=".\FFdecsa_test_testcases.h"
 				>
 			</File>
@@ -218,10 +203,122 @@
 					/>
 				</FileConfiguration>
 			</File>
-			<File
-				RelativePath=".\vlc_common.h"
+			<Filter
+				Name="dvbcsa"
 				>
-			</File>
+				<File
+					RelativePath=".\dvbcsa\config.h"
+					>
+				</File>
+				<File
+					RelativePath=".\dvbcsa\dvbcsa.h"
+					>
+				</File>
+				<File
+					RelativePath=".\dvbcsa\dvbcsa_algo.c"
+					>
+				</File>
+				<File
+					RelativePath=".\dvbcsa\dvbcsa_block.c"
+					>
+				</File>
+				<File
+					RelativePath=".\dvbcsa\dvbcsa_bs.h"
+					>
+				</File>
+				<File
+					RelativePath=".\dvbcsa\dvbcsa_bs_algo.c"
+					>
+				</File>
+				<File
+					RelativePath=".\dvbcsa\dvbcsa_bs_altivec.h"
+					>
+				</File>
+				<File
+					RelativePath=".\dvbcsa\dvbcsa_bs_block.c"
+					>
+				</File>
+				<File
+					RelativePath=".\dvbcsa\dvbcsa_bs_key.c"
+					>
+				</File>
+				<File
+					RelativePath=".\dvbcsa\dvbcsa_bs_mmx.h"
+					>
+				</File>
+				<File
+					RelativePath=".\dvbcsa\dvbcsa_bs_sse.h"
+					>
+				</File>
+				<File
+					RelativePath=".\dvbcsa\dvbcsa_bs_stream.c"
+					>
+				</File>
+				<File
+					RelativePath=".\dvbcsa\dvbcsa_bs_transpose.c"
+					>
+				</File>
+				<File
+					RelativePath=".\dvbcsa\dvbcsa_bs_transpose128.c"
+					>
+					<FileConfiguration
+						Name="Debug|Win32"
+						ExcludedFromBuild="true"
+						>
+						<Tool
+							Name="VCCLCompilerTool"
+						/>
+					</FileConfiguration>
+					<FileConfiguration
+						Name="Release|Win32"
+						ExcludedFromBuild="true"
+						>
+						<Tool
+							Name="VCCLCompilerTool"
+						/>
+					</FileConfiguration>
+				</File>
+				<File
+					RelativePath=".\dvbcsa\dvbcsa_bs_transpose32.c"
+					>
+				</File>
+				<File
+					RelativePath=".\dvbcsa\dvbcsa_bs_transpose64.c"
+					>
+					<FileConfiguration
+						Name="Debug|Win32"
+						ExcludedFromBuild="true"
+						>
+						<Tool
+							Name="VCCLCompilerTool"
+						/>
+					</FileConfiguration>
+					<FileConfiguration
+						Name="Release|Win32"
+						ExcludedFromBuild="true"
+						>
+						<Tool
+							Name="VCCLCompilerTool"
+						/>
+					</FileConfiguration>
+				</File>
+				<File
+					RelativePath=".\dvbcsa\dvbcsa_bs_uint32.h"
+					>
+				</File>
+				<File
+					RelativePath=".\dvbcsa\dvbcsa_bs_uint64.h"
+					>
+				</File>
+				<File
+					RelativePath=".\dvbcsa\dvbcsa_pv.h"
+					>
+				</File>
+				<File
+					RelativePath=".\dvbcsa\dvbcsa_stream.c"
+					>
+				</File>
+			</Filter>
 		</Filter>
 	</Files>
 	<Globals>
