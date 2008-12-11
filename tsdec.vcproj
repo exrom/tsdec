@@ -192,6 +192,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\README.tsdec"
+				>
+			</File>
+			<File
 				RelativePath=".\tsdec.c"
 				>
 				<FileConfiguration

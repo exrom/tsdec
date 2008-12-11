@@ -4,7 +4,7 @@
 #include "csa.h"
 
 /* type definitions dvbcsa_keys_t and dvbcsa_key_s copied from  dvbcsa_pv.h
-   because keys are globals inc csa.c */
+   because keys are globals in csa.c */
 #define DVBCSA_KEYSBUFF_SIZE	56
 
 typedef unsigned char   dvbcsa_keys_t[DVBCSA_KEYSBUFF_SIZE];

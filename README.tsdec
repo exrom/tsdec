@@ -1,0 +1,106 @@
+#########
+TSDEC
+#########
+
+What is TSDEC? 
+TSDEC is a small tool for decrypting recorded DVB transport streams (*.ts) with 
+the recorded control words from a CWL file. First of all have a look at the 
+original CWLDEC readme below. Thanks to the anonymous author for that project!
+
+TSDEC is a successor of cwldec and based on cwldec V0.0.2 from 2004
+TSDEC contains code from LIBDVBCSA and FFdecsa.
+
+differences to CWLDEC:
+- TSDEC runs on windows not linux. Is is compiled with MS Visual C++ 2008
+- TSDEC uses the CSA implementation from LIBDVBCSA project. CWLDEC uses its 
+  own csa code wich has problems with partly filled TS packets. Rework
+  of syncing mechanism.
+- TSDEC does some more plausibility checking of the TS file to be decrypted. 
+- TSDEC can decrypt TS files with a constant CW. No CWL file is needed then. 
+  Constant CW decryption may be used for recorded streams encrypted with 
+  constant CW (wich may be unknown at recording time).
+- TSDEC can encrypt TS files with a constant CW.  
+  Encryption with constant CW may be used for recordings from full featured DVB
+  cards or set top boxes. Some devices with hardware based CSA decryption are 
+  unable to record an encrypted TS without decrypting it (e.g. the dBox 2). 
+  Unfortunately if no correct control word is available at that time, the 
+  stream is "decrypted" with the wrong CW. Then you have to encrypt the stream
+  first with the same wrong CW and decrypt it with the CWs from CWL.
+- TSDEC cannot write the decrypted data to stdout for now.  
+  
+  
+Things not yet implemented in TSDEC (maybe done tomorrow, next year or never)
+- on the fly encryption (constant CW) -> decryption (cw from CWL) without 
+  the need of a temp file.
+- usage of the csa bitslice implementation (FFdecsa) of LIBDVBCSA for speed up.
+
+
+
+ -------------------- original CWLDEC readme file --------------------
+Remember "VCL" files from Videocrypt times? This is its successor for dvb
+cards.
+
+The idea:
+One party with a valid subscription card records the decrypted control words
+to a file, and makes them available later.
+People without subscription record the encrypted video/audio streams, and
+decode them later using the information found in the .cwl file.
+
+This works for all systems where the cam<->card communication is not en-
+crypted, or where the cam<->card encryption is known.
+This would even work for Videoguard, once the cam<->card encryption becomes
+public.
+
+
+This simple program is the decoding part of the game.
+It will descramble a scrambled recording thanks to a provided .cwl file:
+   cwldec -f 040212-1159-30w-11851h-Sol.cwl -o decoded.ts encoded.ts
+
+[The program tries to sync by checking for "00 00 01" in the header of packets
+ where the payload-unit-start-indicator bit is set.]
+
+
+You can record the scrambled streams for example under linux with:
+   szap -r MCM &
+   cat /dev/dvb/adapter0/dvr0 > encoded.ts
+
+
+For the cw recording, the currently used plugins for windows/linux simply
+have to add an option to also record the cws they set to a file as well on
+request.
+So, in SetCaDescriptor() only one line has to be added:
+  fprintf(fpcwl, "%d %02x %02x %02x %02x %02x %02x %02x %02x\n"
+  , parity, cw[0], cw[1], cw[2], cw[3], cw[4], cw[5], cw[6], cw[7]);
+
+[You can also add something like:  "040220-1709-08 12226-002c-06fc"
+(UTC date/time, frequency, sid, ecm-pid) to the line if you want.
+cwldec isn't using these informations yet: it simply ignores everything
+after the 8th byte of the cw.
+]
+
+I'm proposing this convention for .cwl file names:
+  040212-1159-30w-11851h-Sol.cwl
+that's: start date and time in UTC, sat pos., frequency/polar., channel name.
+
+
+*** The .cwl file should start earlier than the recording of the encrypted
+*** streams. Otherwise, the sync may need ages.
+*** In other words: the control word needed to decrypt the first packet in the
+*** encrypted recording should be present in the .cwl file.
+
+
+The program is meant to produce decoded streams, it is not meant for
+viewing encoded streams directly, even if this will work under most circum-
+stances, like : cwldec -f file.cwl encrypted.ts | xine stdin:/
+The standard procedure will be:
+  cwldec -f file.cwl -o decrypted.ts encrypted.ts (and wait....)
+  mplayer decrypted.ts
+[And if you delete the cws used during advertisement breaks, you should
+ get a stream without advertisement ;-) This idea is C hel ;-)]
+
+
+
+Is CWL illegal?
+I'm afraid it might be in most European countries.
+Perhaps it isn't, because - of course - it is released for educational purposes
+only. 

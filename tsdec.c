@@ -20,7 +20,7 @@
 #define  CSA_SELFTEST_ENABLED 1
 
 /* globals */
-static const char *version    = "V0.2.0";
+static const char *version    = "V0.2.1";
 static const char *gProgname  = "TSDEC";
 
 typedef struct
@@ -34,6 +34,10 @@ static cw_t *gpCWlast;        /* pointer to last CW in array */
 static cw_t *gpCWcur;         /* help pointer */
 static int gnCWcnt;           /* number of loaded cws */
 static char gLastParity;
+
+/*static char gUsePreEncryption = 0;*/
+static cw_t gcwEnc_E;
+static cw_t gcwEnc_O;
 
 static int gSynced;                    /* synched flag */
 static unsigned long gCurrentPacket;   /* number of current packet in TS stream */
@@ -233,7 +237,7 @@ static int read_packet(void)
 		if (gpBuf[0] == 0x47)
       {
          cpid     = 0x1FFF & (gpBuf[1]<<8|gpBuf[2]);
-         cpusi    = gpBuf[1]&0x40;
+         cpusi    = gpBuf[1]>>6&0x01;
          ctsc     = gpBuf[3]>>6;
          ccrypted = gpBuf[3]>>7;
          cafc     = gpBuf[3]>>4&0x03;
@@ -363,12 +367,13 @@ int decryptTS(void)
                      continue;
                   csa_key_set(gpCWcur->cw, gpCWcur->parity);
                   memcpy(pBuf, gpBuf, PCKTSIZE);
+                  /* chained encryption (ccw) -> decryption could be done here */
                   csa_decrypt(pBuf);
                   if (PacketStartsWithPayload(pBuf))
                   {
                      gSynced = 1;
                      gLastParity = gpCWcur->parity;
-                     msgDbg(2,"sync at packet %lu. now using CW Nr.:%d CWL line:%d %02x %02x %02x %02x %02x %02x %02x %02x\n", gCurrentPacket, THIS_CW, gpCWcur->parity, gpCWcur->cw[0],gpCWcur->cw[1],gpCWcur->cw[2],gpCWcur->cw[3],gpCWcur->cw[4],gpCWcur->cw[5],gpCWcur->cw[6],gpCWcur->cw[7]);
+                     msgDbg(2,"sync at packet %lu. now using CW Nr.:%d CWL line:%d %02X %02X %02X %02X %02X %02X %02X %02X\n", gCurrentPacket, THIS_CW, gpCWcur->parity, gpCWcur->cw[0],gpCWcur->cw[1],gpCWcur->cw[2],gpCWcur->cw[3],gpCWcur->cw[4],gpCWcur->cw[5],gpCWcur->cw[6],gpCWcur->cw[7]);
                      memcpy(gpBuf, pBuf, PCKTSIZE);
                      break; /* leave gpCWcur at its value */
                   }
@@ -390,7 +395,7 @@ int decryptTS(void)
                {
                   gpCWcur++;
                   gLastParity = gpCWcur->parity;
-                  msgDbg(4, "parity change at packet %lu now using CW Nr.:%d CWL line:%d %02x %02x %02x %02x %02x %02x %02x %02x\n", gCurrentPacket, THIS_CW, gpCWcur->parity, gpCWcur->cw[0],gpCWcur->cw[1],gpCWcur->cw[2],gpCWcur->cw[3],gpCWcur->cw[4],gpCWcur->cw[5],gpCWcur->cw[6],gpCWcur->cw[7]);
+                  msgDbg(4, "parity change at packet %lu now using CW Nr.:%d CWL line:%d %02X %02X %02X %02X %02X %02X %02X %02X\n", gCurrentPacket, THIS_CW, gpCWcur->parity, gpCWcur->cw[0],gpCWcur->cw[1],gpCWcur->cw[2],gpCWcur->cw[3],gpCWcur->cw[4],gpCWcur->cw[5],gpCWcur->cw[6],gpCWcur->cw[7]);
                   /* if the parity changed, and the next packet has the old parity 
                      again (A/V muxing issues), the CSA engine still knows it */
                }
@@ -429,9 +434,10 @@ int decryptTS(void)
 
 int main(int argc, char **argv)
 {
-	int c, upper, ret;
-	char *p, *cwfile=0, *ofile=0;
+	int      c, upper, ret;
+	char     *p, *cwfile=0, *ofile=0, *ifile=0, *ccwstring=0;
    size_t   len;
+   unsigned char ecw[16], encryptWithCCW = 0;
 
 	while ((p = *++argv) != 0 && *p++ == '-') {
 		c = *p++;
@@ -445,6 +451,18 @@ int main(int argc, char **argv)
 					use("-f: missing filename.");
 				cwfile = p;
 				break;
+			case 'e':
+            encryptWithCCW = 1;
+			case 'd':
+				if (!*p && !(p = *++argv))
+					use("missing string for constant CW");
+            ccwstring = p;
+				break;
+			case 'i':
+				if (!*p && !(p = *++argv))
+					use("-i: missing filename.");
+				ifile = p;
+				break;
 			case 'o':
 				if (!*p && !(p = *++argv))
 					use("-o: missing filename.");
@@ -456,9 +474,6 @@ int main(int argc, char **argv)
 				if (*p<'0' || *p>'9')
 					use("-v: wrong level.");
 				gVerboseLevel = *p-'0';
-				/*++debug;*/
-            /*gVerboseLevel>=4 ? debug++ : 0;
-            gVerboseLevel>=6 ? debug++ : 0;*/
 				break;
 			case 'a':
 				analyzeflag=1;
@@ -473,17 +488,20 @@ int main(int argc, char **argv)
 		}
    } /* while arg */
 
+	while (*argv) {
+		msgDbg(2, "parameter ignored: %s\n", *argv++);
+	}
    if (argc<2) use(0);
+
 
    PerformSelfTest();
 
-   /* input file */
-   if (*argv != 0) 
+   /* input file is always needed */
+	if (ifile)
    {
-		/*if (!(fpInfile = fopen(*argv, "rb"))) {*/
-      if( (fopen_s( &fpInfile, *argv, "rb" )) !=0 )
+      if( (fopen_s( &fpInfile, ifile, "rb" )) !=0 )
       {
-			perror(*argv);
+			perror(ifile);
 			exit(0);
 		}
       else
@@ -493,15 +511,15 @@ int main(int argc, char **argv)
       	fseek(fpInfile, 0, SEEK_SET);
          if (len%PCKTSIZE)
          {
-            msgDbg(2, "size of input file %s (%d) is not multiple of %d! (%d packets and %d garbage). TS file may be corrupt!\n", *argv, len, PCKTSIZE, len/PCKTSIZE, len%PCKTSIZE);
+            msgDbg(2, "size of input file %s (%d) is not multiple of %d! (%d packets and %d garbage). TS file may be corrupt!\n", ifile, len, PCKTSIZE, len/PCKTSIZE, len%PCKTSIZE);
          }
       }
-		++argv;
    } 
    else 
    {
       /* no input file given */
-      fpInfile = stdin;
+      /*fpInfile = stdin;*/
+      use("no input file given");
    }
 
    if (analyzeflag) 
@@ -511,6 +529,62 @@ int main(int argc, char **argv)
       exit(0);
    }
 
+   /* process output file */
+	if (ofile) {
+      if ( fopen_s(&fpOutfile, ofile, "wb") != 0 )
+      {
+			perror(ofile);
+			use(0);
+		}
+	}
+
+   if (ccwstring)
+   {
+      memset(ecw, 0, sizeof(ecw));
+		if (sscanf_s(ccwstring, "%x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x", ecw+0, ecw+1, ecw+2, ecw+3, ecw+4, ecw+5, ecw+6, ecw+7, ecw+8, ecw+9, ecw+10, ecw+11, ecw+12, ecw+13, ecw+14, ecw+15) != 16)
+      {
+         use("wrong CCW string format.");
+      }
+      else
+      {
+         if (encryptWithCCW)
+         {
+            msgDbg(2,"encrypting with constant CW\n");
+         }
+         else
+         {
+            msgDbg(2,"decrypting with constant CW\n");
+         }
+
+         /*gUsePreEncryption = 1;*/
+         gcwEnc_E.parity = 0;
+         memcpy(gcwEnc_E.cw, &ecw[0], 8);
+         gcwEnc_O.parity = 1;
+         memcpy(gcwEnc_O.cw, &ecw[8], 8);
+         csa_key_set(gcwEnc_E.cw, gcwEnc_E.parity);
+         csa_key_set(gcwEnc_O.cw, gcwEnc_O.parity);
+         msgDbg(4,"constant CW even: %02X %02X %02X %02X %02X %02X %02X %02X  odd: %02X %02X %02X %02X %02X %02X %02X %02X \n", gcwEnc_E.cw[0], gcwEnc_E.cw[1], gcwEnc_E.cw[2], gcwEnc_E.cw[3], gcwEnc_E.cw[4], gcwEnc_E.cw[5], gcwEnc_E.cw[6], gcwEnc_E.cw[7], gcwEnc_O.cw[0], gcwEnc_O.cw[1], gcwEnc_O.cw[2], gcwEnc_O.cw[3], gcwEnc_O.cw[4], gcwEnc_O.cw[5], gcwEnc_O.cw[6], gcwEnc_O.cw[7]);
+
+         while (!read_packet())
+         {
+            if (IsEncryptedPacket)
+            {
+               if (encryptWithCCW)
+               {
+                  /* also for encryption only the "encrypted" packets are processed. If all PIDs are flagged unencrypted, a more complex logic is needed here */
+                  csa_encrypt(gpBuf, GetPacketParity);
+               }
+               else
+               {
+                  csa_decrypt(gpBuf);
+               }
+            }
+         fwrite(gpBuf, 1, PCKTSIZE, fpOutfile);
+         } /* while */
+      }
+      exit(0);
+	}
+
 	/* process CWL file */
    if (!cwfile) use("-f cwfile not found.");
 	if (load_cws(cwfile)) {
@@ -518,23 +592,7 @@ int main(int argc, char **argv)
 		use("load_cws() failed.");
 	}
 
-   /* process output file */
-	if (ofile) {
-/*		if ((fdout = creat(ofile, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH)) < 0) */
-      if ( fopen_s(&fpOutfile, ofile, "wb") != 0 )
-      /*if ( !(fpOutfile = fopen(ofile, "wb")) )*/
-      {
-			perror(ofile);
-			use(0);
-		}
-	}
-	while (*argv) {
-		msgDbg(2, "+++ ignored: %s\n", *argv++);
-	}
 
-	/*csa_debug = debug;	*/
-
-   /*ret = run();*/
    ret = decryptTS();
 
 	if (gpCWs) free(gpCWs);
@@ -543,28 +601,31 @@ int main(int argc, char **argv)
 
 static void use(const char *txt)
 {
-   fprintf(stderr, "%s %s offline TS decrypter. Build:%s %s.\n",gProgname, version, __DATE__, __TIME__);
 	if (txt) 
    {
-      fprintf(stderr, "\n+++ %s\n",  txt);
+      msgDbg(2,"error: %s\n",  txt);
    }
    else
    {
-	   fprintf(stderr, "%s decrypts recorded DVB transport streams (TS) using \na control word log (CWL) file. Based on cwldec-0.0.2\n\n",gProgname);
-	   fprintf(stderr, "usage:\n%s [-f cwlfile] [-v n] [-a] [-o outputfile] inputfile\n\n", gProgname);
+      fprintf(stderr, "%s %s  Build:%s %s.\n",gProgname, version, __DATE__, __TIME__);
+	   fprintf(stderr, "%s decrypts recorded DVB transport streams (TS) using \na control word log (CWL) file.\n\n",gProgname);
+	   fprintf(stderr, "usage:\n%s [-f cwlfile] [-v n] [-a] -i inputfile [-o outputfile] [-e|-d cw]\n\n", gProgname);
 	   /*fprintf(stderr, "  If no output file is given, write to stdout.\n\n");*/
-	   fprintf(stderr, "    -f cwlfile     use cwlfile to decrypt transport stream\n");
-	   fprintf(stderr, "    inputfile      encrypted recorded transport stream to be decrypted\n");
-	   fprintf(stderr, "                   \n");
-	   fprintf(stderr, "    -o tsfile      decrypted output file\n");
-	   fprintf(stderr, "    -v n           verbose level n (0..9) higher number for more debug info[2]\n");
-	   fprintf(stderr, "    -a             analyze the PIDs of TS file, no decryption is done\n");
+	   fprintf(stderr, "    -f cwlfile    use cwlfile to decrypt transport stream\n");
+	   fprintf(stderr, "    -i inputfile  encrypted recorded transport stream to be decrypted\n");
+	   fprintf(stderr, "                  \n");
+	   fprintf(stderr, "    -o outfile    decrypted output file\n");
+	   fprintf(stderr, "    -v n          verbose level n (0..9) higher number for more debug info [2]\n");
+	   fprintf(stderr, "    -a            analyze the PIDs of input file only. No decryption is done\n");
+	   fprintf(stderr, "    -d cw         decrypt TS with constant cw\n");
+	   fprintf(stderr, "    -e cw         encrypt scrambled packets in TS with constant cw. See readme.\n");
+	   fprintf(stderr, "                  cw = \"EE EE EE EE EE EE EE EE OO OO OO OO OO OO OO OO\"\n");
 	   fprintf(stderr, "\n");
 	   fprintf(stderr, "    debug messages are printed to stderr. for logging use 2>log.txt\n");
 	   fprintf(stderr, "\n");
 	   fprintf(stderr, "  Examples:\n");
-	   fprintf(stderr, "    tsdec -a encrypted.ts\n");
-	   fprintf(stderr, "    tsdec -f 040212-1159.cwl -o decrypted.ts encrypted.ts\n");
+	   fprintf(stderr, "    tsdec -a -i encrypted.ts\n");
+	   fprintf(stderr, "    tsdec -f 081224-1859_P-Feed_1.cwl -i encrypted.ts -o decrypted.ts\n");
    }
 	exit(0);
 }
