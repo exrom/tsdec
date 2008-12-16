@@ -8,17 +8,20 @@ the recorded control words from a CWL file. First of all have a look at the
 original CWLDEC readme below. Thanks to the anonymous author for that project!
 
 TSDEC is a successor of cwldec and based on cwldec V0.0.2 from 2004
-TSDEC contains code from LIBDVBCSA and FFdecsa.
+TSDEC contains code from LIBDVBCSA and FFdecsa. Thanks to the authors!
+Greetings go to www.4freeboard.to. Thanks for the helpful discussions about 
+cwldec.
 
 differences to CWLDEC:
-- TSDEC runs on windows not linux. Is is compiled with MS Visual C++ 2008
+- TSDEC runs on windows not linux. Is is compiled with MS Visual C++ 2008. 
+  Sources enclosed.
 - TSDEC uses the CSA implementation from LIBDVBCSA project. CWLDEC uses its 
-  own csa code wich has problems with partly filled TS packets. Rework
+  own csa code which has problems with partly filled TS packets. Complete rework
   of syncing mechanism.
 - TSDEC does some more plausibility checking of the TS file to be decrypted. 
 - TSDEC can decrypt TS files with a constant CW. No CWL file is needed then. 
   Constant CW decryption may be used for recorded streams encrypted with 
-  constant CW (wich may be unknown at recording time).
+  constant CW (which may be unknown at recording time).
 - TSDEC can encrypt TS files with a constant CW.  
   Encryption with constant CW may be used for recordings from full featured DVB
   cards or set top boxes. Some devices with hardware based CSA decryption are 
@@ -26,14 +29,37 @@ differences to CWLDEC:
   Unfortunately if no correct control word is available at that time, the 
   stream is "decrypted" with the wrong CW. Then you have to encrypt the stream
   first with the same wrong CW and decrypt it with the CWs from CWL.
-- TSDEC cannot write the decrypted data to stdout for now.  
-  
-  
-Things not yet implemented in TSDEC (maybe done tomorrow, next year or never)
-- on the fly encryption (constant CW) -> decryption (cw from CWL) without 
-  the need of a temp file.
-- usage of the csa bitslice implementation (FFdecsa) of LIBDVBCSA for speed up.
+- TSDEC cannot write the decrypted data to stdout for now.
 
+  
+Things not yet implemented in TSDEC
+- usage of the csa bitslice implementation (FFdecsa) of LIBDVBCSA for speed up.
+- on the fly encryption (constant CW) -> decryption (cw from CWL) without 
+  the need of a temp ts file.
+- check for further PUSI packets after sucessful sync. Check if still synced.
+
+How to use:
+- logging of cws into cwl files:
+  Users of set top boxes running a softcam (like camd3, mgcamd,...) may want to
+  use the cwlog utility included in the CWlog directory. Tested with dbox2.
+  I dont know if theres a way to log CWs with a DVB card. 
+  The CWL must have CWs with alternating parity on each line! See example.cwl
+- recording TS files:
+  Works best with budget DVB cards. 
+  With FF card or stb you may have the problems described above. If you're lucky
+  tsdec will sync to cwl and your recorded TS can be decrypted as usual.
+  If not, as a workaround you can encrypt the recorded TS with ccw before 
+  decryptng it with the CWL. Therefore you have to know the CW used for 
+  decryption. Try to record the TS without a softcam loaded and encrypt the TS 
+  with 16 x 0x00 as CW. This works for dbox2!
+  If this was successful, tsdec will sync in the 2nd step and you get a playable 
+  TS file. Otherwise tsdec will not sync.
+- playing the TS file:
+  Use MPlayer or vlc.
+
+Like cwldec, tsdec is also for educational purposes only. 
+  
+And now, have fun!  
 
 
  -------------------- original CWLDEC readme file --------------------

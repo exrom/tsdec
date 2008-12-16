@@ -6,6 +6,8 @@
 #include <stdlib.h>        /* malloc */
 #include <string.h>
 #include <ctype.h>         /* isupper */
+#include <windows.h>       /* for SetPriorityClass() */
+
 
 #include "csa.h"
 
@@ -20,7 +22,7 @@
 #define  CSA_SELFTEST_ENABLED 1
 
 /* globals */
-static const char *version    = "V0.2.1";
+static const char *version    = "V0.2.2";
 static const char *gProgname  = "TSDEC";
 
 typedef struct
@@ -154,7 +156,7 @@ static int load_cws(const char *name)
 	long len;
 	int i, line=0, lastParity=-1;
 	FILE *fpcw;
-	char buf[80];
+	char buf[250];
 
 	/*if (!(fpcw = fopen(name, "r"))) {*/
    if( (fopen_s( &fpcw , name, "r" )) !=0 ) {
@@ -182,11 +184,11 @@ static int load_cws(const char *name)
 /*		if (sscanf(buf, "%d %x %x %x %x %x %x %x %x", &par, a, a+1, a+2, a+3, a+4, a+5, a+6, a+7) != 9) */
 		if (sscanf_s(buf, "%d %x %x %x %x %x %x %x %x", &par, a, a+1, a+2, a+3, a+4, a+5, a+6, a+7) != 9) 
       {
-			msgDbg(2, "+++ line %4d: ignored: %s" , line, buf);
+			msgDbg(2, "CWL line %4d: ignored: %s" , line, buf);
 			continue;
 		}
 		if (lastParity == par)
-			msgDbg(2, "repeated parity in line %4d: %s\n" , line, buf);
+			msgDbg(2, "repeated parity in line %d: \"%s\"  TS will not be decrypted correctly!!\n" , line, buf);
       lastParity = par;
       gpCWcur->parity = par;
 		for (k = 0; k<8; ++k)
@@ -206,7 +208,7 @@ static int load_cws(const char *name)
 /* read a new packet from TS input file and make basic plausibility checking */
 static int read_packet(void)
 {
-   unsigned char  i, ccc, ctsc, cpusi, ccrypted, cafc;
+   unsigned char  i, ccc, ctsc, cpusi, ccrypted, cafc, cdi;
    unsigned int   cpid;
 	int ret;
    /*
@@ -242,6 +244,7 @@ static int read_packet(void)
          ccrypted = gpBuf[3]>>7;
          cafc     = gpBuf[3]>>4&0x03;
          ccc      = gpBuf[3]&0x0F;
+         cdi      = (gpBuf[3]>>7&0x01) ? (gpBuf[5]>>7&0x01) : 0;
 
          msgDbg(8, "current packet: PID:0x%04x  PUSI: %d  TSC:%d CC:%d\n", cpid, cpusi, ctsc, ccc );
 
@@ -251,10 +254,13 @@ static int read_packet(void)
             {
                /* this pid is already in our statistics array */
                pid[i].crypted = ccrypted;
-               if (((ccc-pid[i].cc)&0x0F) != 1)
+               if (  (((ccc-pid[i].cc)&0x0F) != 1) && !cdi)
                {
-                  msgDbg(2, "TS discontinuity detected. PID: %04x CC %d -> %d. TS corrupt?\n",
-                     cpid, pid[i].cc, ccc );
+                  msgDbg(2, "TS discontinuity detected. PID: %04x CC %d -> %d. packet nr.: %d (0x%08x).\n",
+                     cpid, pid[i].cc, ccc,
+                     gCurrentPacket, 
+                     (gCurrentPacket-1)*PCKTSIZE
+                     );
                }
 
                if (pid[i].crypted != ccrypted)
@@ -337,7 +343,7 @@ int PacketStartsWithPayload(unsigned char *pBuf)
    }
    else
    {
-      msgDbg(4, "plausible payload start found in PUSI packet after decryption\n");
+      msgDbg(4, "PES header found in PUSI packet after decryption\n");
       return 1;
    }
 }
@@ -373,7 +379,7 @@ int decryptTS(void)
                   {
                      gSynced = 1;
                      gLastParity = gpCWcur->parity;
-                     msgDbg(2,"sync at packet %lu. now using CW Nr.:%d CWL line:%d %02X %02X %02X %02X %02X %02X %02X %02X\n", gCurrentPacket, THIS_CW, gpCWcur->parity, gpCWcur->cw[0],gpCWcur->cw[1],gpCWcur->cw[2],gpCWcur->cw[3],gpCWcur->cw[4],gpCWcur->cw[5],gpCWcur->cw[6],gpCWcur->cw[7]);
+                     msgDbg(2,"sync at packet %lu. using CW #%d \"%d %02X %02X %02X %02X %02X %02X %02X %02X\"\n", gCurrentPacket, THIS_CW, gpCWcur->parity, gpCWcur->cw[0],gpCWcur->cw[1],gpCWcur->cw[2],gpCWcur->cw[3],gpCWcur->cw[4],gpCWcur->cw[5],gpCWcur->cw[6],gpCWcur->cw[7]);
                      memcpy(gpBuf, pBuf, PCKTSIZE);
                      break; /* leave gpCWcur at its value */
                   }
@@ -395,7 +401,7 @@ int decryptTS(void)
                {
                   gpCWcur++;
                   gLastParity = gpCWcur->parity;
-                  msgDbg(4, "parity change at packet %lu now using CW Nr.:%d CWL line:%d %02X %02X %02X %02X %02X %02X %02X %02X\n", gCurrentPacket, THIS_CW, gpCWcur->parity, gpCWcur->cw[0],gpCWcur->cw[1],gpCWcur->cw[2],gpCWcur->cw[3],gpCWcur->cw[4],gpCWcur->cw[5],gpCWcur->cw[6],gpCWcur->cw[7]);
+                  msgDbg(2, "parity change at packet %lu. using CW #%d \"%d %02X %02X %02X %02X %02X %02X %02X %02X\"\n", gCurrentPacket, THIS_CW, gpCWcur->parity, gpCWcur->cw[0],gpCWcur->cw[1],gpCWcur->cw[2],gpCWcur->cw[3],gpCWcur->cw[4],gpCWcur->cw[5],gpCWcur->cw[6],gpCWcur->cw[7]);
                   /* if the parity changed, and the next packet has the old parity 
                      again (A/V muxing issues), the CSA engine still knows it */
                }
@@ -407,15 +413,16 @@ int decryptTS(void)
                csa_key_set(gpCWcur->cw, gpCWcur->parity);
             }  /* if (GetPacketParity != gLastParity) */
             csa_decrypt(gpBuf);
+            fwrite(gpBuf, 1, PCKTSIZE, fpOutfile);
          }  /* synced */
       }  /* if (IsEncryptedPacket) */
       else
       {
          /* not encrypted */
+         /* if sync was not successful, the output TS contains the unencrypted packets only */
+         fwrite(gpBuf, 1, PCKTSIZE, fpOutfile);
       }
-      /* write unencrypted and decrypted packets to outfile */
-      if (gSynced) fwrite(gpBuf, 1, PCKTSIZE, fpOutfile);
-   }
+   }  /* while (!read_packet()) */
 
    /* no more data from infile */
    if (gSynced) 
@@ -537,6 +544,8 @@ int main(int argc, char **argv)
 			use(0);
 		}
 	}
+
+   SetPriorityClass(GetCurrentProcess(), BELOW_NORMAL_PRIORITY_CLASS);
 
    if (ccwstring)
    {
