@@ -29,6 +29,7 @@ differences to CWLDEC:
   Unfortunately if no correct control word is available at that time, the 
   stream is "decrypted" with the wrong CW. Then you have to encrypt the stream
   first with the same wrong CW and decrypt it with the CWs from CWL.
+- TSDEC supports cw blocking.
 - TSDEC cannot write the decrypted data to stdout for now.
 
   
@@ -54,6 +55,14 @@ How to use:
   with 16 x 0x00 as CW. This works for dbox2!
   If this was successful, tsdec will sync in the 2nd step and you get a playable 
   TS file. Otherwise tsdec will not sync.
+- decrypting TS files:
+  The cw change blocker (-b) supresses the usage of a new cw from the CWL for 
+  each parity if it happens after less than n packets. Useful for transmissions 
+  where the parity toggles for a while when the cw changes. The value must be 
+  decreased if the bit rate of the stream is very low (1000 packets per second 
+  for a ~1.4 MBit stream) and if the CW changes very often. Use greater value if 
+  parity toggles for a longer time and tsdec accidently uses the next cw from cwl 
+  file. The decrypted stream would not be readable after that point. Default: 300
 - playing the TS file:
   Use MPlayer or vlc.
 
