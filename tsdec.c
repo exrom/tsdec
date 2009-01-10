@@ -8,6 +8,7 @@ using a control word log (CWL) file.
 File: tsdec.c
 
 History:
+V0.2.4   11.01.09    CW checksum calculation
 V0.2.3   19.12.08    parity change blocking + return codes + clean ups
 V0.2.2   12.12.08    constant cw encryption/decryption
 V0.2.1   11.12.08    CSA from libdvbcsa project
@@ -24,7 +25,7 @@ V0.1     09.12.08    initial revision based on cwldec 0.0.2
 
 #include "csa.h"
 
-#include "FFdecsa_test_testcases.h"
+#include "csa_testcases.h"
 
 /* definitions */
 #define  THIS_CW              ((gpCWcur-gpCWs)/*/sizeof(cw_t)*/)
@@ -51,7 +52,7 @@ typedef enum {
 } tenReturnValue;
 
 /* globals */
-static const char *version    = "V0.2.3";
+static const char *version    = "V0.2.4";
 static const char *gProgname  = "TSDEC";
 
 typedef struct
@@ -131,7 +132,8 @@ static unsigned char PerformSelfTest(void)
       {0, test_2_key,      test_2_encrypted,       test_2_expected},
       {0, test_3_key,      test_3_encrypted,       test_3_expected},
       {0, test_p_10_0_key, test_p_10_0_encrypted,  test_p_10_0_expected},
-      {0, test_p_1_6_key,  test_p_1_6_encrypted,   test_p_1_6_expected}
+      {0, test_p_1_6_key,  test_p_1_6_encrypted,   test_p_1_6_expected},
+      {0, test_7_key,      test_7_encrypted,       test_7_expected}
    };
 
    #define num_cases sizeof(cases)/sizeof(testcase_t)
@@ -187,6 +189,7 @@ static int load_cws(const char *name)
 {
    long len;
    int i, line=0, lastParity=-1;
+   unsigned char  checksumcorrected=0;
    FILE *fpcw;
    char buf[LINEBUFSIZE];
 
@@ -208,7 +211,7 @@ static int load_cws(const char *name)
    gpCWs = gpCWcur;
    buf[sizeof(buf)-1] = 0;
    for (i = 0; i < gnCWcnt; ++i) {
-      int a[8], par, k;
+      int a[8], par, k, chk;
       if (!fgets(buf, sizeof(buf)-1, fpcw)) break;
       ++line;
       if (buf[0]=='#' || buf[0]==';' || buf[0]=='*')
@@ -222,11 +225,17 @@ static int load_cws(const char *name)
          msgDbg(2, "repeated parity in line %d: \"%s\"  TS may not be decrypted correctly!!\n" , line, buf);
       lastParity = par;
       gpCWcur->parity = par;
+      chk = (a[0]+a[1]+a[2])&0xFF;
+      if (a[3] != chk)  {a[3] = chk;   checksumcorrected = 1;}
+      chk = (a[4]+a[5]+a[6])&0xFF;
+      if (a[7] != chk)  {a[7] = chk;   checksumcorrected = 1;}
       for (k = 0; k<8; ++k)
          gpCWcur->cw[k] = a[k];
+      msgDbg(4, "%d %x %x %x %x %x %x %x %x\n", par, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7])
       ++gpCWcur;
    }
    fclose(fpcw);
+   if (checksumcorrected) msgDbg(2, "CW checksum errors corrected.\n" , line, buf);
    msgDbg(2, "\"%s\": %d lines, %d cws loaded.\n", name, gnCWcnt, gpCWcur-gpCWs);
    gnCWcnt = gpCWcur-gpCWs;
    gpCWlast = gpCWcur;
@@ -676,6 +685,13 @@ int main(int argc, char **argv)
       }
       else
       {
+         if (  (ccw[3]  != ((ccw[0] + ccw[1] + ccw[2]) &0xFF))   ||
+               (ccw[7]  != ((ccw[4] + ccw[5] + ccw[6]) &0xFF))   ||
+               (ccw[11] != ((ccw[8] + ccw[9] + ccw[10])&0xFF))   ||
+               (ccw[15] != ((ccw[12]+ ccw[13]+ ccw[14])&0xFF)) )
+         {
+            msgDbg(2,"checksum errors in constant CW detected!\n");
+         }
          msgDbg(2,"%scrypting with constant CW\n", encryptWithCCW?"en":"de");
 
          gcwEnc_0.parity = 0;
@@ -717,7 +733,6 @@ static void use(const char *txt)
       /*fprintf(stderr, "  If no output file is given, write to stdout.\n\n");*/
       fprintf(stderr, "    -f cwlfile    use cwlfile to decrypt transport stream\n");
       fprintf(stderr, "    -i inputfile  encrypted recorded transport stream to be decrypted\n");
-      fprintf(stderr, "                  \n");
       fprintf(stderr, "    -o outfile    decrypted output file\n");
       fprintf(stderr, "    -v n          verbose level n (0..9) higher number for more debug info [2]\n");
       fprintf(stderr, "    -a            analyze the PIDs of input file only. No decryption is done\n");

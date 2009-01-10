@@ -8,12 +8,13 @@
 #
 # History:
 #
+# V1.2   11.01.09    alternating order of CW parity at start of log file
 # V1.1   17.12.08    replacement of CWx: case insensitive
 # V1.0   07.12.08    initial release
 #
 #################################################################################
 
-VER='CWlog V1.1' 
+VER='CWlog V1.2' 
 
 IN="/tmp/ecm.info" 
 OUT_PRE="/tmp/"
@@ -58,8 +59,11 @@ do
          OUT="$OUT_PRE$DATTIM$CHANNEL$OUT_POST"
          
          LASTLINE1=$LINE1
-         LASTCW0=""
-         LASTCW1=""
+         # the 1st two CWs cannot be written until parity of the 3rd is known
+         # make the CW change detection fail for the first time
+         LASTCW0=$CW0
+         LASTCW1=$CW1
+         INITIALCW=1
          LASTTIMEPOSIX=-1
          date +"# $VER - logging of $CHANNEL started at: %D %T"  >>$OUT
          echo "# $LINE1"  >>$OUT
@@ -76,12 +80,24 @@ do
         
          if [ "$LASTCW0" != "$CW0" ] ; then
             #echo "new CW0 detected"
+            if [ "$INITIALCW" != 0 ] ; then
+               # even CW did change first, -> CW order: 0,1,0 
+               echo $LASTCW0|sed s/CW0:/0/I >>$OUT
+               echo $LASTCW1|sed s/CW1:/1/I >>$OUT
+               INITIALCW=0;
+            fi
             LASTCW0=$CW0
             CW0=`echo $CW0|sed s/CW0:/0/I`
             date +"$CW0 # %T $SECDELTA"  >>$OUT  # this is current time and not time of $IN
          fi
          if [ "$LASTCW1" != "$CW1" ]  ; then
             #echo "new CW1 detected"
+            if [ "$INITIALCW" != 0 ] ; then
+               # odd CW did change first, -> CW order: 1,0,1
+               echo $LASTCW1|sed s/CW1:/1/I >>$OUT
+               echo $LASTCW0|sed s/CW0:/0/I >>$OUT
+               INITIALCW=0;
+            fi
             LASTCW1=$CW1
             CW1=`echo $CW1|sed s/CW1:/1/I`
             date +"$CW1 # %T $SECDELTA"  >>$OUT  # this is current time and not time of $IN
