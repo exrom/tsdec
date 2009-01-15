@@ -8,6 +8,7 @@ using a control word log (CWL) file.
 File: tsdec.c
 
 History:
+V0.2.5   16.01.09    no dynamic libraries
 V0.2.4   11.01.09    CW checksum calculation
 V0.2.3   19.12.08    parity change blocking + return codes + clean ups
 V0.2.2   12.12.08    constant cw encryption/decryption
@@ -52,7 +53,7 @@ typedef enum {
 } tenReturnValue;
 
 /* globals */
-static const char *version    = "V0.2.4";
+static const char *version    = "V0.2.5";
 static const char *gProgname  = "TSDEC";
 
 typedef struct
