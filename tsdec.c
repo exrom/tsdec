@@ -8,6 +8,7 @@ using a control word log (CWL) file.
 File: tsdec.c
 
 History:
+V0.2.6   20.01.09    time measure
 V0.2.5   16.01.09    no dynamic libraries
 V0.2.4   11.01.09    CW checksum calculation
 V0.2.3   19.12.08    parity change blocking + return codes + clean ups
@@ -16,6 +17,9 @@ V0.2.1   11.12.08    CSA from libdvbcsa project
 V0.1     09.12.08    initial revision based on cwldec 0.0.2
 
 ********************************************************************************/
+
+static const char *version    = "V0.2.6";
+static const char *gProgname  = "TSDEC";
 
 #include <stdio.h>
 #include <stdlib.h>        /* malloc */
@@ -53,9 +57,6 @@ typedef enum {
 } tenReturnValue;
 
 /* globals */
-static const char *version    = "V0.2.5";
-static const char *gProgname  = "TSDEC";
-
 typedef struct
 {
    unsigned char parity;
@@ -392,6 +393,9 @@ static int decryptCWL(void)
    unsigned char  pBuf[PCKTSIZE];
    unsigned int gCWblockCntr_0 = 0;       /* for even CW */
    unsigned int gCWblockCntr_1 = 0;       /* for odd CW */
+   unsigned long time_start, pps;
+   float deltatime, MBps;
+
 
    gSynced = 0;
    msgDbg(2, "trying to sync...\n");
@@ -430,6 +434,7 @@ static int decryptCWL(void)
                      msgDbg(2,"sync at packet %lu. using CW #%d \"%d %02X %02X %02X %02X %02X %02X %02X %02X\"\n", gCurrentPacket, THIS_CW, gpCWcur->parity, gpCWcur->cw[0],gpCWcur->cw[1],gpCWcur->cw[2],gpCWcur->cw[3],gpCWcur->cw[4],gpCWcur->cw[5],gpCWcur->cw[6],gpCWcur->cw[7]);
                      /* write local buffer to outfile */
                      fwrite(pBuf, 1, PCKTSIZE, fpOutfile);
+                     time_start = GetTickCount();  /* start time measure */
                      break; /* leave gpCWcur at its value */
                   }
                   else
@@ -519,6 +524,13 @@ static int decryptCWL(void)
    {
       /* read_packet finished without error /*/
       msgDbg(2, "end of TS input file reached. Total number of packets: %d.\n", gCurrentPacket);
+
+      /* stop time measure */
+      deltatime   = (float)(GetTickCount() - time_start ) / 1000;
+      pps         = gCurrentPacket * 1024 / (int)(deltatime*1024);
+      MBps        = (float)pps * PCKTSIZE / (1024*1024);
+      msgDbg(2, "total time %.2fs (%d packets/s, %.2f MB/s)\n", deltatime, pps, MBps);
+
       /* close files */
       return RET_OK;
    }
