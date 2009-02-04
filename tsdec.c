@@ -8,6 +8,7 @@ using a control word log (CWL) file.
 File: tsdec.c
 
 History:
+V0.2.7   05.02.09    adaptation field is considered for PES header check
 V0.2.6   20.01.09    time measure
 V0.2.5   16.01.09    no dynamic libraries
 V0.2.4   11.01.09    CW checksum calculation
@@ -18,7 +19,7 @@ V0.1     09.12.08    initial revision based on cwldec 0.0.2
 
 ********************************************************************************/
 
-static const char *version    = "V0.2.6";
+static const char *version    = "V0.2.7";
 static const char *gProgname  = "TSDEC";
 
 #include <stdio.h>
@@ -218,7 +219,7 @@ static int load_cws(const char *name)
       ++line;
       if (buf[0]=='#' || buf[0]==';' || buf[0]=='*')
          continue;
-      if (sscanf_s(buf, "%d %x %x %x %x %x %x %x %x", &par, a, a+1, a+2, a+3, a+4, a+5, a+6, a+7) != 9)
+      if (sscanf_s(buf, "%d %x %x %x %x %x %x %x %x ", &par, a, a+1, a+2, a+3, a+4, a+5, a+6, a+7) != 9)
       {
          msgDbg(2, "CWL line %4d: ignored: %s" , line, buf);
          continue;
@@ -233,7 +234,7 @@ static int load_cws(const char *name)
       if (a[7] != chk)  {a[7] = chk;   checksumcorrected = 1;}
       for (k = 0; k<8; ++k)
          gpCWcur->cw[k] = a[k];
-      msgDbg(4, "%d %x %x %x %x %x %x %x %x\n", par, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7])
+      msgDbg(4, "%d %02X %02X %02X %02X  %02X %02X %02X %02X \n", par, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7])
       ++gpCWcur;
    }
    fclose(fpcw);
@@ -373,17 +374,51 @@ static void printPIDstatistics(void)
    }
 }
 
-static int PacketStartsWithPayload(unsigned char *pBuf)
+static int PacketHasPESHeader(unsigned char *pBuf)
 {
-   if (memcmp(&pBuf[4], "\x00\x00\x01", 3))
+   unsigned char  *p;
+   unsigned char  u8AFC;
+
+   u8AFC = pBuf[3]>>4&0x03;
+   /*2  AFC   Adaption Field Control
+               1. 01 – no adaptation field, payload only
+               2. 10 – adaptation field only, no payload
+               3. 11 – adaptation field followed by payload
+               4. 00 - RESERVED for future use*/
+   
+   p = &pBuf[4];
+   switch (u8AFC) 
    {
-      msgDbg(6, "no PES header found.\n");
+   case 3:
+      if (*p < 181)  /* 188-4-1-3*/
+      {
+         p += *p + 1;   /* skipping adapt field. points now to 1st payload byte */
+      }
+      else
+      {
+         msgDbg(6, "Adaptation Field is too long!. No space left for PES header\n");
+         return 0;
+      }
+      /* fall thru */
+   case 1:
+      if (memcmp(p, "\x00\x00\x01", 3))
+      {
+         msgDbg(6, "no PES header found.\n");
+         return 0;
+      }
+      else
+      {
+         msgDbg(4, "PES header found in packet\n");
+         return 1;
+      }
+   case 2:
+      /* this should never happen as we have pusi packet here only */
+      msgDbg(4, "Packet has adapt.field but no payload!\n");
       return 0;
-   }
-   else
-   {
-      msgDbg(4, "PES header found in packet\n");
-      return 1;
+   default:
+      /* 00 is reserved and 01 should never happen as we have pusi packet here only */
+      msgDbg(4, "Illegal adaptation field value: %d\n", u8AFC);
+      return 0;
    }
 }
 
@@ -419,7 +454,7 @@ static int decryptCWL(void)
                   memcpy(pBuf, gpBuf, PCKTSIZE);   /* copy global to local buffer */
                   /* chained encryption (ccw) -> decryption could be done here */
                   csa_decrypt(pBuf);
-                  if (PacketStartsWithPayload(pBuf))
+                  if (PacketHasPESHeader(pBuf))
                   {
                      gSynced = 1;
                      gLastParity = par;
@@ -449,7 +484,7 @@ static int decryptCWL(void)
          {  /* we are in sync */
             /* does it make sense to do the PUSI sync check here again?
                maybe to skip 'holes' in CWL file to do a re sync */
-            msgDbg(6, "B0 %d, B1 %d  LP %d CP %d\n", gCWblockCntr_0, gCWblockCntr_1, gLastParity, GetPacketParity);
+            /*msgDbg(6, "B0 %d, B1 %d  LP %d CP %d\n", gCWblockCntr_0, gCWblockCntr_1, gLastParity, GetPacketParity);*/
             if (GetPacketParity != gLastParity)
             {
                if (  (!GetPacketParity && !gCWblockCntr_0) ||
@@ -496,14 +531,20 @@ static int decryptCWL(void)
 
             if(IsPUSIPacket)
             {
-               if (PacketStartsWithPayload(gpBuf))
+               if (PacketHasPESHeader(gpBuf)) 
                {
-                  msgDbg(4,"PES header at PUSI packet %lu.\n", gCurrentPacket);
+                  msgDbg(4,"PES header at PUSI packet %lu. PID %04x\n", gCurrentPacket,
+                     (0x1FFF & (gpBuf[1]<<8|gpBuf[2])) );
                }
                else
                {
-                  msgDbg(4,"no PES header at PUSI packet %lu.\n", gCurrentPacket);
+                  msgDbg(4,"no PES header at PUSI packet %lu. PID %04x\n", gCurrentPacket,
+                     (0x1FFF & (gpBuf[1]<<8|gpBuf[2])) );
                }
+               msgDbg(4,"   %02X %02X %02X %02X  %02X %02X %02X %02X  %02X %02X %02X %02X  %02X %02X %02X %02X\n",
+                  gpBuf[0],gpBuf[1],gpBuf[2], gpBuf[3], gpBuf[4], gpBuf[5], gpBuf[6], gpBuf[7],
+                  gpBuf[8],gpBuf[9],gpBuf[10],gpBuf[11],gpBuf[12],gpBuf[13],gpBuf[14],gpBuf[15]
+                  );
             }
 
             fwrite(gpBuf, 1, PCKTSIZE, fpOutfile);
