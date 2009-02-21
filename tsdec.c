@@ -8,18 +8,28 @@ using a control word log (CWL) file.
 File: tsdec.c
 
 History:
+V0.2.8   22.02.09    bugfix: crash when decrytion is done in zero time
+                     bugfix: crash when CWL is shorter than TS
+
 V0.2.7   05.02.09    adaptation field is considered for PES header check
+
 V0.2.6   20.01.09    time measure
+
 V0.2.5   16.01.09    no dynamic libraries
+
 V0.2.4   11.01.09    CW checksum calculation
+
 V0.2.3   19.12.08    parity change blocking + return codes + clean ups
+
 V0.2.2   12.12.08    constant cw encryption/decryption
+
 V0.2.1   11.12.08    CSA from libdvbcsa project
+
 V0.1     09.12.08    initial revision based on cwldec 0.0.2
 
 ********************************************************************************/
 
-static const char *version    = "V0.2.7";
+static const char *version    = "V0.2.8";
 static const char *gProgname  = "TSDEC";
 
 #include <stdio.h>
@@ -241,7 +251,7 @@ static int load_cws(const char *name)
    if (checksumcorrected) msgDbg(2, "CW checksum errors corrected.\n" , line, buf);
    msgDbg(2, "\"%s\": %d lines, %d cws loaded.\n", name, gnCWcnt, gpCWcur-gpCWs);
    gnCWcnt = gpCWcur-gpCWs;
-   gpCWlast = gpCWcur;
+   gpCWlast = gpCWcur - 1;
    if (gnCWcnt < 2)
    {
       msgDbg(2, "Too less CWs found in %s\n", gnCWcnt, name);
@@ -568,9 +578,16 @@ static int decryptCWL(void)
 
       /* stop time measure */
       deltatime   = (float)(GetTickCount() - time_start ) / 1000;
-      pps         = gCurrentPacket * 1024 / (int)(deltatime*1024);
-      MBps        = (float)pps * PCKTSIZE / (1024*1024);
-      msgDbg(2, "total time %.2fs (%d packets/s, %.2f MB/s)\n", deltatime, pps, MBps);
+      if (deltatime)
+      {
+         pps         = gCurrentPacket * 1024 / (int)(deltatime*1024);
+         MBps        = (float)pps * PCKTSIZE / (1024*1024);
+         msgDbg(2, "total time %.2fs (%d packets/s, %.2f MB/s)\n", deltatime, pps, MBps);
+      }
+      else
+      {
+         msgDbg(2, "total time %.2fs\n", deltatime);
+      }
 
       /* close files */
       return RET_OK;
@@ -707,8 +724,6 @@ int main(int argc, char **argv)
    }
    else
    {
-      /* no input file given */
-      /*fpInfile = stdin;*/
       use("no input file given");
    }
 
@@ -726,6 +741,10 @@ int main(int argc, char **argv)
          perror(ofile);
          exit(RET_OUTFILEOPEN);
       }
+   }
+   else
+   {
+      use("no output file given");
    }
 
    SetPriorityClass(GetCurrentProcess(), BELOW_NORMAL_PRIORITY_CLASS);

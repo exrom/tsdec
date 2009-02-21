@@ -1,10 +1,9 @@
-# this is an example cw log file
-1 D0 21 0E FF 0F F4 24 27
-0 94 2D 77 38 CF 49 28 40
-1 A5 B6 6F CA 9B D3 28 96
-0 01 33 11 45 06 D5 2C 07
-1 9B 09 87 2B 21 97 75 2D
-0 93 3E F8 C9 9B 80 E8 03
-1 E5 28 1A 27 F6 34 B0 DA
-0 4A 98 09 EB B9 D5 E6 74
-1 B3 AA A6 03 7A 06 39 B9
+# this is an example cw log file 
+#
+# type:
+# tsdec -f example.cwl -i example_crypted.ts -o example_clean.ts
+#
+0 00 00 00 00 00 00 00 00
+1 11 22 33 66 44 55 66 FF 
+0 77 88 99 98 AA BB CC 31
+1 FF FF FF FD FF FF FF FD
