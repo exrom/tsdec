@@ -2,12 +2,14 @@
 
 TSDEC   
 
-Offline decryptor for recorded DVB transport streams (TS) 
+Offline decrypter for recorded DVB transport streams (TS) 
 using a control word log (CWL) file.
 
 File: tsdec.c
 
 History:
+V0.3.0   21.03.09    resyncing + faster sync if TS starts before CWL
+
 V0.2.8   22.02.09    bugfix: crash when decrytion is done in zero time
                      bugfix: crash when CWL is shorter than TS
 
@@ -29,7 +31,7 @@ V0.1     09.12.08    initial revision based on cwldec 0.0.2
 
 ********************************************************************************/
 
-static const char *version    = "V0.2.8";
+static const char *version    = "V0.3.0";
 static const char *gProgname  = "TSDEC";
 
 #include <stdio.h>
@@ -74,18 +76,17 @@ typedef struct
    unsigned char cw[8];
 } cw_t;
 
-static cw_t *gpCWs;           /* pointer to all CWs array */
-static cw_t *gpCWlast;        /* pointer to last CW in array */
+static cw_t *gpCWs;           /* pointer to first CW */
+static cw_t *gpCWlast;        /* pointer to last CW + 1 */
 static cw_t *gpCWcur;         /* help pointer */
 static int gnCWcnt;           /* number of loaded cws */
-static char gLastParity;
+
 static unsigned int gCWblocker   = 300;
 
 /*static char gUsePreEncryption = 0;*/
 static cw_t gcwEnc_0;
 static cw_t gcwEnc_1;
 
-static int gSynced;                    /* synched flag */
 static unsigned long gCurrentPacket;   /* number of current packet in TS stream */
 static unsigned char gpBuf[PCKTSIZE];  /* temp buffer for one TS packet */
 /*static int fdout = 1;*/
@@ -149,9 +150,7 @@ static unsigned char PerformSelfTest(void)
       {0, test_7_key,      test_7_encrypted,       test_7_expected}
    };
 
-   #define num_cases sizeof(cases)/sizeof(testcase_t)
-
-   for(i=0; i<num_cases; i++)
+   for(i=0; i<sizeof(cases)/sizeof(testcase_t); i++)
    {
       csa_key_set(cases[i].key, cases[i].par);
       memcpy(testbuf, cases[i].encrypted, PCKTSIZE);
@@ -251,7 +250,7 @@ static int load_cws(const char *name)
    if (checksumcorrected) msgDbg(2, "CW checksum errors corrected.\n" , line, buf);
    msgDbg(2, "\"%s\": %d lines, %d cws loaded.\n", name, gnCWcnt, gpCWcur-gpCWs);
    gnCWcnt = gpCWcur-gpCWs;
-   gpCWlast = gpCWcur - 1;
+   gpCWlast = gpCWcur;
    if (gnCWcnt < 2)
    {
       msgDbg(2, "Too less CWs found in %s\n", gnCWcnt, name);
@@ -432,17 +431,43 @@ static int PacketHasPESHeader(unsigned char *pBuf)
    }
 }
 
+/*
+void DumpKey(const cw_t* CW, unsigned int num)
+{
+   fprintf(stdout, "unsigned char pusi_%d_key[8] = {", num);
+   fprintf(stdout, "0x%02X, 0x%02X, 0x%02X, 0x%02X,  0x%02X, 0x%02X, 0x%02X, 0x%02X};\n",
+      CW->cw[0], CW->cw[1], CW->cw[2], CW->cw[3], 
+      CW->cw[4], CW->cw[5], CW->cw[6], CW->cw[7]);
+   fprintf(stdout, "unsigned char pusi_%d_parity = %d;\n\n", num, CW->parity);
+}
+
+void DumpPacket(const unsigned char* pck, unsigned int num, unsigned char* name)
+{
+   unsigned char i;
+
+   fprintf(stdout, "unsigned char pusi_%d_%s[188] = {\n", num, name);
+   fprintf(stdout, "0x%02X, 0x%02X, 0x%02X, 0x%02X, ", pck[0], pck[1], pck[2], pck[3]);
+   for (i=4; i<PCKTSIZE-1; i++)
+   {
+      if (!((i-4)%32)) fprintf(stdout, "\n", pck[i]);
+      if ( (i-4)%32 && !((i-4)%8) ) fprintf(stdout, " ", pck[i]);
+      fprintf(stdout, "0x%02X, ", pck[i]);
+   }
+   fprintf(stdout, "0x%02X};\n\n", pck[PCKTSIZE-1]);
+}
+*/
+
 static int decryptCWL(void)
 {
-   int par, ret;
-   unsigned char  pBuf[PCKTSIZE];
-   unsigned int gCWblockCntr_0 = 0;       /* for even CW */
-   unsigned int gCWblockCntr_1 = 0;       /* for odd CW */
-   unsigned long time_start, pps;
-   float deltatime, MBps;
+   int            par, ret, synced, syncedOnce, skipParity;
+   unsigned char  pBuf[PCKTSIZE], lastParity;
+   unsigned int   gCWblockCntr_0 = 0;       /* for even CW */
+   unsigned int   gCWblockCntr_1 = 0;       /* for odd CW */
+   unsigned long  time_start, pps;
+   float          deltatime, MBps;
 
 
-   gSynced = 0;
+   synced = 0; skipParity = 0;
    msgDbg(2, "trying to sync...\n");
 
    gCurrentPacket = 0;
@@ -450,12 +475,13 @@ static int decryptCWL(void)
    {
       if (IsEncryptedPacket)
       {
-         if (!gSynced)
+         if (!synced)
          {
-            if(IsPUSIPacket)
+            if(IsPUSIPacket && (!skipParity || (GetPacketParity != lastParity) ) )
             {
+               skipParity = 0;
                /* now try all CWs with same parity, decrypt packet and have a look at it */
-               for(gpCWcur = gpCWs; gpCWcur <= gpCWlast; gpCWcur++)
+               for(gpCWcur = gpCWs; gpCWcur < gpCWlast; gpCWcur++)
                {
                   par = GetPacketParity;
                   if (gpCWcur->parity != par )
@@ -466,8 +492,8 @@ static int decryptCWL(void)
                   csa_decrypt(pBuf);
                   if (PacketHasPESHeader(pBuf))
                   {
-                     gSynced = 1;
-                     gLastParity = par;
+                     synced = 1; syncedOnce = 1;
+                     lastParity = par;
                      if (!par)
                      {
                         gCWblockCntr_0 = gCWblocker;
@@ -488,27 +514,31 @@ static int decryptCWL(void)
                      continue;   /* try next cw */
                   }
                }  /* for CWs */
+               if (gpCWcur == gpCWlast)
+               {
+                  /* no matching cw found - skip all pusis until parity changes */
+                  skipParity = 1;
+                  lastParity = par;
+               }
             }  /* if(IsPUSIPacket) */
-         }  /* if (!gSynced) */
+         }  /* if (!synced) */
          else
          {  /* we are in sync */
-            /* does it make sense to do the PUSI sync check here again?
-               maybe to skip 'holes' in CWL file to do a re sync */
-            /*msgDbg(6, "B0 %d, B1 %d  LP %d CP %d\n", gCWblockCntr_0, gCWblockCntr_1, gLastParity, GetPacketParity);*/
-            if (GetPacketParity != gLastParity)
+            /*msgDbg(6, "B0 %d, B1 %d  LP %d CP %d\n", gCWblockCntr_0, gCWblockCntr_1, lastParity, GetPacketParity);*/
+            if (GetPacketParity != lastParity)
             {
                if (  (!GetPacketParity && !gCWblockCntr_0) ||
                      ( GetPacketParity && !gCWblockCntr_1) )
                {
                   /* parity changed after blocking delay */
                   /* get next CW */
-                  if (gpCWcur < gpCWlast)
+                  if (gpCWcur < (gpCWlast-1))
                   {
                      gpCWcur++;
-                     gLastParity = gpCWcur->parity;
+                     lastParity = gpCWcur->parity;
                      msgDbg(2, "parity change at packet %lu. using CW #%d \"%d %02X %02X %02X %02X %02X %02X %02X %02X\"\n", gCurrentPacket, THIS_CW, gpCWcur->parity, gpCWcur->cw[0],gpCWcur->cw[1],gpCWcur->cw[2],gpCWcur->cw[3],gpCWcur->cw[4],gpCWcur->cw[5],gpCWcur->cw[6],gpCWcur->cw[7]);
                      csa_key_set(gpCWcur->cw, gpCWcur->parity);
-                     if (gLastParity)
+                     if (lastParity)
                      {
                         /* parity changed from 0 to 1, the blocker of 0 is set to max.
                            if then another packet with the (old) cw parity 0 comes up again, 
@@ -533,7 +563,7 @@ static int decryptCWL(void)
                      GetPacketParity,
                      gCurrentPacket);
                }
-            }  /* if (GetPacketParity != gLastParity) */
+            }  /* if (GetPacketParity != lastParity) */
             gCWblockCntr_1>0 ? gCWblockCntr_1-- : 0;
             gCWblockCntr_0>0 ? gCWblockCntr_0-- : 0;
 
@@ -541,20 +571,11 @@ static int decryptCWL(void)
 
             if(IsPUSIPacket)
             {
-               if (PacketHasPESHeader(gpBuf)) 
+               if (!PacketHasPESHeader(gpBuf)) 
                {
-                  msgDbg(4,"PES header at PUSI packet %lu. PID %04x\n", gCurrentPacket,
-                     (0x1FFF & (gpBuf[1]<<8|gpBuf[2])) );
+                  msgDbg(2,"lost sync at packet %lu. Outfile may not be playable. Trying resync.\n", gCurrentPacket);
+                  synced = 0;
                }
-               else
-               {
-                  msgDbg(4,"no PES header at PUSI packet %lu. PID %04x\n", gCurrentPacket,
-                     (0x1FFF & (gpBuf[1]<<8|gpBuf[2])) );
-               }
-               msgDbg(4,"   %02X %02X %02X %02X  %02X %02X %02X %02X  %02X %02X %02X %02X  %02X %02X %02X %02X\n",
-                  gpBuf[0],gpBuf[1],gpBuf[2], gpBuf[3], gpBuf[4], gpBuf[5], gpBuf[6], gpBuf[7],
-                  gpBuf[8],gpBuf[9],gpBuf[10],gpBuf[11],gpBuf[12],gpBuf[13],gpBuf[14],gpBuf[15]
-                  );
             }
 
             fwrite(gpBuf, 1, PCKTSIZE, fpOutfile);
@@ -564,6 +585,7 @@ static int decryptCWL(void)
       {
          /* not encrypted */
          /* if sync was not successful, the output TS contains the unencrypted packets only */
+         /* if TS file starts early, write only certain PIDs to outfile? */
          fwrite(gpBuf, 1, PCKTSIZE, fpOutfile);
       }
    }  /* while (!read_packet()) */
@@ -571,7 +593,7 @@ static int decryptCWL(void)
    if (ret != RET_EOF) return ret;
 
    /* no more data from infile */
-   if (gSynced)
+   if (syncedOnce)
    {
       /* read_packet finished without error /*/
       msgDbg(2, "end of TS input file reached. Total number of packets: %d.\n", gCurrentPacket);
