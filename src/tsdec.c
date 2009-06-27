@@ -3,11 +3,24 @@
 TSDEC   
 
 Offline decrypter for recorded DVB transport streams (TS) 
-using a control word log (CWL) file.
+using a control word log file (CWL).      by ganymede
+
+This program is free software; you can redistribute it and/or modify it under 
+the terms of the GNU General Public License as published by the Free Software 
+Foundation; either version 3 of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY 
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A 
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with 
+this program; if not, see <http://www.gnu.org/licenses/>.
 
 File: tsdec.c
 
 History:
+V0.3.1   28.06.09    faster recync with repeated parity + mingw32 make
+
 V0.3.0   21.03.09    resyncing + faster sync if TS starts before CWL
 
 V0.2.8   22.02.09    bugfix: crash when decrytion is done in zero time
@@ -31,7 +44,7 @@ V0.1     09.12.08    initial revision based on cwldec 0.0.2
 
 ********************************************************************************/
 
-static const char *version    = "V0.3.0";
+static const char *version    = "V0.3.1";
 static const char *gProgname  = "TSDEC";
 
 #include <stdio.h>
@@ -63,6 +76,7 @@ typedef enum {
    RET_SELFTESTFAILED,
    RET_INFILEOPEN,
    RET_OUTFILEOPEN,
+   RET_CWLFILEOPEN,
    RET_TOOLESSCWS,
    RET_OUTOFMEMORY,
    RET_USAGE,
@@ -104,15 +118,14 @@ typedef struct
 } pidstat_t;
 
 pidstat_t      pid[23];          /* array for pid statistics */
-unsigned char  pidcnt;           /* number of different PIDs found so far */
+unsigned int  pidcnt;           /* number of different PIDs found so far */
 static char gVerboseLevel = 2;
 
 /* prototypes */
 static void use(const char *);
 
 
-#define msgDbg(vl, ptxt, ... ) \
-   if ((vl)<=gVerboseLevel) {fprintf(stderr, "%s: ",gProgname);fprintf(stderr, (ptxt), __VA_ARGS__);}
+#define msgDbg(vl, ... ) if ((vl)<=gVerboseLevel) {fprintf(stderr, "%s: ",gProgname);fprintf(stderr, __VA_ARGS__);}
 
 
 /* functions */
@@ -205,10 +218,10 @@ static int load_cws(const char *name)
    FILE *fpcw;
    char buf[LINEBUFSIZE];
 
-   /*if (!(fpcw = fopen(name, "r"))) {*/
-   if( (fopen_s( &fpcw , name, "r" )) !=0 ) {
-      perror(name);
-      return 1;
+   if (!(fpcw = fopen(name, "r"))) {
+   /*if( (fopen_s( &fpcw , name, "r" )) !=0 ) {*/
+      msgDbg(0, "file open failed: %s", name);
+      return RET_CWLFILEOPEN;
    }
    len = filelength(fpcw);
    gnCWcnt = filelines(fpcw);
@@ -228,7 +241,7 @@ static int load_cws(const char *name)
       ++line;
       if (buf[0]=='#' || buf[0]==';' || buf[0]=='*')
          continue;
-      if (sscanf_s(buf, "%d %x %x %x %x %x %x %x %x ", &par, a, a+1, a+2, a+3, a+4, a+5, a+6, a+7) != 9)
+      if (sscanf(buf, "%d %x %x %x %x %x %x %x %x ", &par, a, a+1, a+2, a+3, a+4, a+5, a+6, a+7) != 9)
       {
          msgDbg(2, "CWL line %4d: ignored: %s" , line, buf);
          continue;
@@ -247,13 +260,13 @@ static int load_cws(const char *name)
       ++gpCWcur;
    }
    fclose(fpcw);
-   if (checksumcorrected) msgDbg(2, "CW checksum errors corrected.\n" , line, buf);
+   if (checksumcorrected) msgDbg(2, "CW checksum errors corrected.\n");
    msgDbg(2, "\"%s\": %d lines, %d cws loaded.\n", name, gnCWcnt, gpCWcur-gpCWs);
    gnCWcnt = gpCWcur-gpCWs;
    gpCWlast = gpCWcur;
    if (gnCWcnt < 2)
    {
-      msgDbg(2, "Too less CWs found in %s\n", gnCWcnt, name);
+      msgDbg(2, "Too less CWs found in %s\n", name);
       return RET_TOOLESSCWS;
    }
    return RET_OK;
@@ -301,7 +314,7 @@ static int read_packet(void)
          ccc      = gpBuf[3]&0x0F;
          cdi      = (gpBuf[3]>>7&0x01) ? (gpBuf[5]>>7&0x01) : 0;
 
-         msgDbg(8, "current packet: PID:0x%04x  PUSI: %d  TSC:%d CC:%d  packet #:%d\n", cpid, cpusi, ctsc, ccc, gCurrentPacket );
+         msgDbg(8, "current packet: PID:0x%04x  PUSI: %d  TSC:%d CC:%d  packet #:%lu\n", cpid, cpusi, ctsc, ccc, gCurrentPacket );
 
          for (i=0; i<pidcnt; i++)
          {
@@ -310,7 +323,7 @@ static int read_packet(void)
                /* this pid is already in our statistics array */
                if (  (((ccc-pid[i].cc)&0x0F) != 1) && !cdi)
                {
-                  msgDbg(4, "TS discontinuity detected. PID: %04x CC %d -> %d. packet nr.: %d (0x%08x).\n",
+                  msgDbg(4, "TS discontinuity detected. PID: %04x CC %d -> %d. packet nr.: %lu (0x%08lx).\n",
                      cpid, pid[i].cc, ccc,
                      gCurrentPacket,
                      (gCurrentPacket-1)*PCKTSIZE
@@ -319,7 +332,7 @@ static int read_packet(void)
 
                if (pid[i].crypted != ccrypted)
                {
-                  msgDbg(4, "encryption state changed (%d>%d). PID: %04x   packet nr.: %d (0x%08x)\n",
+                  msgDbg(4, "encryption state changed (%d>%d). PID: %04x   packet nr.: %lu (0x%08lx)\n",
                      pid[i].crypted,
                      ccrypted,
                      cpid,
@@ -341,7 +354,7 @@ static int read_packet(void)
                pid[pidcnt].crypted  = ccrypted;
                pid[pidcnt].cc       = ccc;
                pid[pidcnt].count    = 1;
-               msgDbg(4, "New PID found: %04x  TSC: %d CC: %d  packet nr.: %d (0x%08x)\n", cpid, ctsc, ccc, gCurrentPacket, gCurrentPacket*PCKTSIZE);
+               msgDbg(4, "New PID found: %04x  TSC: %d CC: %d  packet nr.: %lu (0x%08lx)\n", cpid, ctsc, ccc, gCurrentPacket, gCurrentPacket*PCKTSIZE);
                pidcnt++;
             }
             else
@@ -352,7 +365,7 @@ static int read_packet(void)
       }
       else
       {
-         msgDbg(2, "TS sync byte 0x47 not found at packet nr.: %d (0x%08x). TS corrupt?\n", gCurrentPacket+1, gCurrentPacket*PCKTSIZE);
+         msgDbg(2, "TS sync byte 0x47 not found at packet nr.: %lu (0x%08lx). TS corrupt?\n", gCurrentPacket+1, gCurrentPacket*PCKTSIZE);
          return RET_TSCORRUPT;
       }
       return RET_OK;
@@ -376,10 +389,10 @@ static void printPIDstatistics(void)
 {
    unsigned char i;
 
-   msgDbg(2, "%PID statistics summary:\n");
+   msgDbg(2, "PID statistics summary:\n");
    for (i=0; i<pidcnt; i++)
    {
-      msgDbg(2, "PID: %04x crypted:%d count: %d  (%d%%)\n", pid[i].pid, pid[i].crypted, pid[i].count, 100*(pid[i].count)/gCurrentPacket);
+      msgDbg(2, "PID: %04x crypted:%d count: %lu  (%lu%%)\n", pid[i].pid, pid[i].crypted, pid[i].count, 100*(pid[i].count)/gCurrentPacket);
    }
 }
 
@@ -431,7 +444,7 @@ static int PacketHasPESHeader(unsigned char *pBuf)
    }
 }
 
-/*
+#if 0
 void DumpKey(const cw_t* CW, unsigned int num)
 {
    fprintf(stdout, "unsigned char pusi_%d_key[8] = {", num);
@@ -455,19 +468,19 @@ void DumpPacket(const unsigned char* pck, unsigned int num, unsigned char* name)
    }
    fprintf(stdout, "0x%02X};\n\n", pck[PCKTSIZE-1]);
 }
-*/
+#endif
 
 static int decryptCWL(void)
 {
-   int            par, ret, synced, syncedOnce, skipParity;
-   unsigned char  pBuf[PCKTSIZE], lastParity;
+   int            par = 0, ret = 0, lastParity = -1, synced, syncedOnce, skipParity;
+   unsigned char  pBuf[PCKTSIZE];
    unsigned int   gCWblockCntr_0 = 0;       /* for even CW */
    unsigned int   gCWblockCntr_1 = 0;       /* for odd CW */
-   unsigned long  time_start, pps;
+   unsigned long  time_start = 0, pps;
    float          deltatime, MBps;
 
 
-   synced = 0; skipParity = 0;
+   synced = 0; syncedOnce = 0; skipParity = 0;
    msgDbg(2, "trying to sync...\n");
 
    gCurrentPacket = 0;
@@ -477,6 +490,9 @@ static int decryptCWL(void)
       {
          if (!synced)
          {
+            /* only PUSI packets are checked. If skipParity is set to 1 (we have already 
+               tried all possible cws without success for this parity sequence) we wait 
+               for changed parity */
             if(IsPUSIPacket && (!skipParity || (GetPacketParity != lastParity) ) )
             {
                skipParity = 0;
@@ -531,26 +547,36 @@ static int decryptCWL(void)
                      ( GetPacketParity && !gCWblockCntr_1) )
                {
                   /* parity changed after blocking delay */
-                  /* get next CW */
-                  if (gpCWcur < (gpCWlast-1))
+                  /* get next CW with matching parity*/
+                  while(gpCWcur < (gpCWlast-1))
                   {
                      gpCWcur++;
-                     lastParity = gpCWcur->parity;
-                     msgDbg(2, "parity change at packet %lu. using CW #%d \"%d %02X %02X %02X %02X %02X %02X %02X %02X\"\n", gCurrentPacket, THIS_CW, gpCWcur->parity, gpCWcur->cw[0],gpCWcur->cw[1],gpCWcur->cw[2],gpCWcur->cw[3],gpCWcur->cw[4],gpCWcur->cw[5],gpCWcur->cw[6],gpCWcur->cw[7]);
-                     csa_key_set(gpCWcur->cw, gpCWcur->parity);
-                     if (lastParity)
+                     if (GetPacketParity == gpCWcur->parity)
                      {
-                        /* parity changed from 0 to 1, the blocker of 0 is set to max.
-                           if then another packet with the (old) cw parity 0 comes up again, 
-                           no new cw is fetched from CWL */
-                        gCWblockCntr_0 = gCWblocker; 
+                        lastParity = gpCWcur->parity;
+                        msgDbg(2, "packet %lu. using CW #%d \"%d %02X %02X %02X %02X %02X %02X %02X %02X\"\r", gCurrentPacket, THIS_CW, gpCWcur->parity, gpCWcur->cw[0],gpCWcur->cw[1],gpCWcur->cw[2],gpCWcur->cw[3],gpCWcur->cw[4],gpCWcur->cw[5],gpCWcur->cw[6],gpCWcur->cw[7]);
+                        csa_key_set(gpCWcur->cw, gpCWcur->parity);
+                        if (lastParity)
+                        {
+                           /* parity changed from 0 to 1, the blocker of 0 is set to max.
+                              if then another packet with the (old) cw parity 0 comes up again, 
+                              no new cw is fetched from CWL */
+                           gCWblockCntr_0 = gCWblocker; 
+                           break;
+                        }
+                        else
+                        {
+                           gCWblockCntr_1 = gCWblocker;
+                           break;
+                        }
                      }
                      else
                      {
-                        gCWblockCntr_1 = gCWblocker;
+                        msgDbg(4, "skipping CW#%d. Parity %d needed.\n", THIS_CW, GetPacketParity);
                      }
                   }
-                  else
+                  /*else*/
+                  if (gpCWcur == (gpCWlast-1) )
                   {
                      msgDbg(2, "no more CWs available for decryption! CWL file too short?\n");
                      return RET_OUTOFCWS;
@@ -596,7 +622,7 @@ static int decryptCWL(void)
    if (syncedOnce)
    {
       /* read_packet finished without error /*/
-      msgDbg(2, "end of TS input file reached. Total number of packets: %d.\n", gCurrentPacket);
+      msgDbg(2, "end of TS input file reached. Total number of packets: %lu.\n", gCurrentPacket);
 
       /* stop time measure */
       deltatime   = (float)(GetTickCount() - time_start ) / 1000;
@@ -604,7 +630,7 @@ static int decryptCWL(void)
       {
          pps         = gCurrentPacket * 1024 / (int)(deltatime*1024);
          MBps        = (float)pps * PCKTSIZE / (1024*1024);
-         msgDbg(2, "total time %.2fs (%d packets/s, %.2f MB/s)\n", deltatime, pps, MBps);
+         msgDbg(2, "total time %.2fs (%lu packets/s, %.2f MB/s)\n", deltatime, pps, MBps);
       }
       else
       {
@@ -698,7 +724,7 @@ int main(int argc, char **argv)
          case 'b':
             if (!*p && !(p = *++argv))
                use("-b missing argument.");
-            if (sscanf_s(p, "%d", &gCWblocker) != 1)
+            if (sscanf(p, "%d", &gCWblocker) != 1)
             {
                use("-b wrong argument.");
             }
@@ -723,14 +749,15 @@ int main(int argc, char **argv)
    if (argc<2) use(0);
 
 
-   if (ret=PerformSelfTest()) exit(ret);
+   if ( (ret=PerformSelfTest()) == RET_SELFTESTFAILED) exit(ret);
 
    /* input file is always needed */
    if (ifile)
    {
-      if( (fopen_s( &fpInfile, ifile, "rb" )) !=0 )
+      if(!(fpInfile = fopen(ifile, "rb" )))
+      /*if( (fopen_s( &fpInfile, ifile, "rb" )) !=0 )*/
       {
-         perror(ifile);
+         msgDbg(0, "file open failed: %s", ifile);
          exit(RET_INFILEOPEN);
       }
       else
@@ -758,9 +785,10 @@ int main(int argc, char **argv)
 
    /* process output file */
    if (ofile) {
-      if ( fopen_s(&fpOutfile, ofile, "wb") != 0 )
+      if ( !(fpOutfile = fopen(ofile, "w+b")) )
+      /*if ( fopen_s(&fpOutfile, ofile, "w+b") != 0 )*/
       {
-         perror(ofile);
+         msgDbg(0, "file open failed: %s", ofile);
          exit(RET_OUTFILEOPEN);
       }
    }
@@ -774,7 +802,9 @@ int main(int argc, char **argv)
    if (ccwstring)
    {
       memset(ccw, 0, sizeof(ccw));
-      if (sscanf_s(ccwstring, "%x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x", ccw+0, ccw+1, ccw+2, ccw+3, ccw+4, ccw+5, ccw+6, ccw+7, ccw+8, ccw+9, ccw+10, ccw+11, ccw+12, ccw+13, ccw+14, ccw+15) != 16)
+      if (sscanf(ccwstring, "%x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x", 
+         &ccw[0], &ccw[1],  &ccw[2],  &ccw[3],  &ccw[4],  &ccw[5],  &ccw[6],  &ccw[7], 
+         &ccw[8], &ccw[9], &ccw[10], &ccw[11], &ccw[12], &ccw[13], &ccw[14], &ccw[15]) != 16)
       {
          use("wrong CCW string format.");
       }
@@ -801,7 +831,7 @@ int main(int argc, char **argv)
 
    /* process CWL file */
    if (!cwfile) use("-f cwfile not found.");
-   if (ret = load_cws(cwfile)) {
+   if ( (ret = load_cws(cwfile)) != 0) {
       if (gpCWs) free(gpCWs);
       msgDbg(2,"cannot load CWL file %s\n", cwfile);
       return RET_CWLOPEN;
@@ -839,8 +869,8 @@ static void use(const char *txt)
       fprintf(stderr, "    debug messages are printed to stderr. for logging use 2>log.txt\n");
       fprintf(stderr, "\n");
       fprintf(stderr, "  Examples:\n");
-      fprintf(stderr, "    tsdec -a -i encrypted.ts\n");
-      fprintf(stderr, "    tsdec -f 081224-1859_P-Feed_1.cwl -i encrypted.ts -o decrypted.ts\n");
+      fprintf(stderr, "    tsdec -f logged_cws.cwl -i recording.ts -o decrypted.ts\n");
+      fprintf(stderr, "    tsdec -a -i recording.ts\n");
    }
    exit(RET_USAGE);
 }

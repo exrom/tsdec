@@ -5,3 +5,4 @@ typedef unsigned int         uint32_t;
 typedef unsigned long long   uint64_t;
 #define inline /* error C2054: Nach 'inline' muss '(' folgen */
 #define DVBCSA_USE_UINT32        1
+

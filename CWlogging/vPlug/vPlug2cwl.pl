@@ -1,4 +1,13 @@
 #!perl
+#
+# this script converts vPlug log files to CW log files for use with tsdec
+#
+# it searches in vPlug file for lines like
+# [05.01.2009 11:09:43] - ProgDVB4.72.6:ORF1 - DCW: 153159132245E4C004443BCAEE95240A
+# [05.01.2009 11:09:53] - ProgDVB4.72.6:ORF1 - DCW: F18EEB4512B70C7D04443BCAEE95240A
+# the DCW part contains even and odd control word. The cw that changes if printed out to cwl file
+# 0 F1 8E EB 6A 12 B7 0C D5      # 11:09:53
+# 
 
 my $ver = "vPlug2cwl.pl V0.4";
 
@@ -19,7 +28,7 @@ sub cwstring{
    return $r;
 }
 
-print "$ver converts vPlug log files to CW log files for use with tsldec\n";
+print "$ver converts vPlug log files to CW log files for use with tsdec\n";
 print "reading $infilename...\n";
 open(V, "<$infilename") or die "cannot open \"$infilename\" for read access\n";
 
