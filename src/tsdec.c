@@ -7,7 +7,7 @@ using a control word log file (CWL).      by ganymede
 
 This program is free software; you can redistribute it and/or modify it under 
 the terms of the GNU General Public License as published by the Free Software 
-Foundation; either version 3 of the License, or (at your option) any later version.
+Foundation; either Version 3 of the License, or (at your option) any later Version.
 
 This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A 
@@ -19,6 +19,8 @@ this program; if not, see <http://www.gnu.org/licenses/>.
 File: tsdec.c
 
 History:
+V0.4.0   25.10.09    added gui and small bugfixes
+
 V0.3.1   28.06.09    faster recync with repeated parity + mingw32 make
 
 V0.3.0   21.03.09    resyncing + faster sync if TS starts before CWL
@@ -44,8 +46,8 @@ V0.1     09.12.08    initial revision based on cwldec 0.0.2
 
 ********************************************************************************/
 
-static const char *version    = "V0.3.1";
-static const char *gProgname  = "TSDEC";
+const char *szVersion    = "V0.4.0";
+const char *szProgname  = "TSDEC";
 
 #include <stdio.h>
 #include <stdlib.h>        /* malloc */
@@ -53,10 +55,12 @@ static const char *gProgname  = "TSDEC";
 #include <ctype.h>         /* isupper */
 #include <windows.h>       /* for SetPriorityClass() */
 
-
 #include "csa.h"
+#include "tsdec.h"
 
-#include "csa_testcases.h"
+#ifdef _WINDOWS
+#include "tsdecgui.h"
+#endif
 
 /* definitions */
 #define  THIS_CW              ((gpCWcur-gpCWs)/*/sizeof(cw_t)*/)
@@ -65,24 +69,16 @@ static const char *gProgname  = "TSDEC";
 #define  GetPacketParity      ((gpBuf[3]&0x40) == 0x40)
 #define  PCKTSIZE             188
 #define  LINEBUFSIZE          250
+
+#ifdef _WINDOWS
+/*#define  CSA_SELFTEST_ENABLED 1*/
+#else
 #define  CSA_SELFTEST_ENABLED 1
+#endif
 
-typedef enum {
-   RET_OK,
-   RET_NOSYNC,
-   RET_OUTOFCWS,
-   RET_TSCORRUPT,
-   RET_CWLOPEN,
-   RET_SELFTESTFAILED,
-   RET_INFILEOPEN,
-   RET_OUTFILEOPEN,
-   RET_CWLFILEOPEN,
-   RET_TOOLESSCWS,
-   RET_OUTOFMEMORY,
-   RET_USAGE,
-   RET_EOF
-} tenReturnValue;
-
+#ifdef CSA_SELFTEST_ENABLED
+#include "csa_testcases.h"
+#endif
 /* globals */
 typedef struct
 {
@@ -101,11 +97,12 @@ static unsigned int gCWblocker   = 300;
 static cw_t gcwEnc_0;
 static cw_t gcwEnc_1;
 
-static unsigned long gCurrentPacket;   /* number of current packet in TS stream */
+unsigned long gCurrentPacket;   /* number of current packet in TS stream */
+unsigned long gNumberOfPackets; /* total packets in TS stream */
+
 static unsigned char gpBuf[PCKTSIZE];  /* temp buffer for one TS packet */
 /*static int fdout = 1;*/
 /*static int debug;*/
-static char analyzeflag;
 static FILE    *fpInfile;
 static FILE    *fpOutfile;
 
@@ -120,15 +117,31 @@ typedef struct
 pidstat_t      pid[23];          /* array for pid statistics */
 unsigned int  pidcnt;           /* number of different PIDs found so far */
 static char gVerboseLevel = 2;
+unsigned char szDbgMsg[200];
+unsigned char u8SyncCnt;
+unsigned char u8CancelDecryption;
 
 /* prototypes */
+#ifndef _WINDOWS
 static void use(const char *);
+#endif
 
-
-#define msgDbg(vl, ... ) if ((vl)<=gVerboseLevel) {fprintf(stderr, "%s: ",gProgname);fprintf(stderr, __VA_ARGS__);}
-
+#ifdef _WINDOWS
+#ifdef MSVC
+#define snprintf _snprintf
+#endif
+#define msgDbg(vl, ... )  															\
+  if ((vl)<=gVerboseLevel) 														\
+{ 																							\
+	 if ( snprintf(szDbgMsg, sizeof(szDbgMsg)-1, __VA_ARGS__) > 0 ) 	\
+	 WinMsgDbg(szDbgMsg);															\
+}
+#else
+#define msgDbg(vl, ... ) if ((vl)<=gVerboseLevel) {fprintf(stderr, "%s: ",szProgname);fprintf(stderr, __VA_ARGS__);}
+#endif
 
 /* functions */
+#ifdef CSA_SELFTEST_ENABLED
 static int compare(unsigned char *p1, unsigned char *p2, int n)
 {
    unsigned char i;
@@ -143,7 +156,6 @@ static int compare(unsigned char *p1, unsigned char *p2, int n)
 
 static unsigned char PerformSelfTest(void)
 {
-#ifdef CSA_SELFTEST_ENABLED
    unsigned char  testbuf[PCKTSIZE], i;
 
    typedef struct {
@@ -172,17 +184,17 @@ static unsigned char PerformSelfTest(void)
       csa_decrypt(testbuf);
       if (!compare(testbuf, cases[i].expected, 188))
       {
-         msgDbg(2, "self test of CSA engine has FAILED! (test case %d)\n", i);
+         msgDbg(2, "self test of CSA engine has FAILED! (test case %d)\r\n", i);
          return(RET_SELFTESTFAILED);
       }
       else
       {
-         msgDbg(4, "self test of CSA engine passed (test case %d)\n", i);
+         msgDbg(4, "self test of CSA engine passed (test case %d)\r\n", i);
       }
    }
-#endif
    return(RET_OK);
 }
+#endif
 
 
 
@@ -210,7 +222,7 @@ static int filelines(FILE *f)
    return nlines;
 }
 
-static int load_cws(const char *name)
+int load_cws(const char *name)
 {
    long len;
    int i, line=0, lastParity=-1;
@@ -226,11 +238,11 @@ static int load_cws(const char *name)
    len = filelength(fpcw);
    gnCWcnt = filelines(fpcw);
    if (gnCWcnt < 2) {
-      msgDbg(2, "%s: strange file length: %ld (%d lines).\n", name, len, gnCWcnt);
+      msgDbg(2, "%s: strange file length: %ld (%d lines).\r\n", name, len, gnCWcnt);
       if (gnCWcnt < 1) return RET_TOOLESSCWS;
    }
    if (!(gpCWcur = (cw_t *)malloc(gnCWcnt*sizeof(cw_t)))) {
-      msgDbg(2, "+++ out of memory.\n");
+      msgDbg(2, "+++ out of memory.\r\n");
       return RET_OUTOFMEMORY;
    }
    gpCWs = gpCWcur;
@@ -247,7 +259,7 @@ static int load_cws(const char *name)
          continue;
       }
       if (lastParity == par)
-         msgDbg(2, "repeated parity in line %d: \"%s\"  TS may not be decrypted correctly!!\n" , line, buf);
+         msgDbg(2, "repeated parity in line %d: \"%s\"  TS may not be decrypted correctly!!\r\n" , line, buf);
       lastParity = par;
       gpCWcur->parity = par;
       chk = (a[0]+a[1]+a[2])&0xFF;
@@ -256,22 +268,25 @@ static int load_cws(const char *name)
       if (a[7] != chk)  {a[7] = chk;   checksumcorrected = 1;}
       for (k = 0; k<8; ++k)
          gpCWcur->cw[k] = a[k];
-      msgDbg(4, "%d %02X %02X %02X %02X  %02X %02X %02X %02X \n", par, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7])
+      msgDbg(4, "%d %02X %02X %02X %02X  %02X %02X %02X %02X \r\n", par, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7])
       ++gpCWcur;
    }
    fclose(fpcw);
-   if (checksumcorrected) msgDbg(2, "CW checksum errors corrected.\n");
-   msgDbg(2, "\"%s\": %d lines, %d cws loaded.\n", name, gnCWcnt, gpCWcur-gpCWs);
+   if (checksumcorrected) msgDbg(2, "CW checksum errors corrected.\r\n");
+   msgDbg(2, "\"%s\": %d lines, %d cws loaded.\r\n", name, gnCWcnt, gpCWcur-gpCWs);
    gnCWcnt = gpCWcur-gpCWs;
    gpCWlast = gpCWcur;
    if (gnCWcnt < 2)
    {
-      msgDbg(2, "Too less CWs found in %s\n", name);
+      msgDbg(2, "Too less CWs found in %s\r\n", name);
       return RET_TOOLESSCWS;
    }
    return RET_OK;
 }
-
+void unload_cws(void)
+{
+   if (gpCWs) free(gpCWs);
+}
 
 /* read a new packet from TS input file and make basic plausibility checking */
 static int read_packet(void)
@@ -314,7 +329,7 @@ static int read_packet(void)
          ccc      = gpBuf[3]&0x0F;
          cdi      = (gpBuf[3]>>7&0x01) ? (gpBuf[5]>>7&0x01) : 0;
 
-         msgDbg(8, "current packet: PID:0x%04x  PUSI: %d  TSC:%d CC:%d  packet #:%lu\n", cpid, cpusi, ctsc, ccc, gCurrentPacket );
+         msgDbg(8, "current packet: PID:0x%04x  PUSI: %d  TSC:%d CC:%d  packet #:%lu\r\n", cpid, cpusi, ctsc, ccc, gCurrentPacket );
 
          for (i=0; i<pidcnt; i++)
          {
@@ -323,7 +338,7 @@ static int read_packet(void)
                /* this pid is already in our statistics array */
                if (  (((ccc-pid[i].cc)&0x0F) != 1) && !cdi)
                {
-                  msgDbg(4, "TS discontinuity detected. PID: %04x CC %d -> %d. packet nr.: %lu (0x%08lx).\n",
+                  msgDbg(4, "TS discontinuity detected. PID: %04x CC %d -> %d. packet nr.: %lu (0x%08lx).\r\n",
                      cpid, pid[i].cc, ccc,
                      gCurrentPacket,
                      (gCurrentPacket-1)*PCKTSIZE
@@ -332,7 +347,7 @@ static int read_packet(void)
 
                if (pid[i].crypted != ccrypted)
                {
-                  msgDbg(4, "encryption state changed (%d>%d). PID: %04x   packet nr.: %lu (0x%08lx)\n",
+                  msgDbg(4, "encryption state changed (%d>%d). PID: %04x   packet nr.: %lu (0x%08lx)\r\n",
                      pid[i].crypted,
                      ccrypted,
                      cpid,
@@ -354,18 +369,19 @@ static int read_packet(void)
                pid[pidcnt].crypted  = ccrypted;
                pid[pidcnt].cc       = ccc;
                pid[pidcnt].count    = 1;
-               msgDbg(4, "New PID found: %04x  TSC: %d CC: %d  packet nr.: %lu (0x%08lx)\n", cpid, ctsc, ccc, gCurrentPacket, gCurrentPacket*PCKTSIZE);
+               msgDbg(4, "New PID found: %04x  TSC: %d CC: %d  packet nr.: %lu (0x%08lx)\r\n", cpid, ctsc, ccc, gCurrentPacket, gCurrentPacket*PCKTSIZE);
                pidcnt++;
             }
             else
             {
-               msgDbg(2, "too much different PIDs in this TS stream\n");
+               msgDbg(2, "too much different PIDs in this TS stream\r\n");
             }
          }
       }
       else
       {
-         msgDbg(2, "TS sync byte 0x47 not found at packet nr.: %lu (0x%08lx). TS corrupt?\n", gCurrentPacket+1, gCurrentPacket*PCKTSIZE);
+         msgDbg(2, "TS sync byte 0x47 not found at packet nr.: %lu (0x%08lx). TS corrupt?\r\n", gCurrentPacket+1, gCurrentPacket*PCKTSIZE);
+         /* try to resync to TS here ? */
          return RET_TSCORRUPT;
       }
       return RET_OK;
@@ -389,10 +405,10 @@ static void printPIDstatistics(void)
 {
    unsigned char i;
 
-   msgDbg(2, "PID statistics summary:\n");
+   msgDbg(2, "PID statistics summary:\r\n");
    for (i=0; i<pidcnt; i++)
    {
-      msgDbg(2, "PID: %04x crypted:%d count: %lu  (%lu%%)\n", pid[i].pid, pid[i].crypted, pid[i].count, 100*(pid[i].count)/gCurrentPacket);
+      msgDbg(2, "PID: %04x crypted:%d count: %lu  (%lu%%)\r\n", pid[i].pid, pid[i].crypted, pid[i].count, 100*(pid[i].count)/gCurrentPacket);
    }
 }
 
@@ -418,28 +434,28 @@ static int PacketHasPESHeader(unsigned char *pBuf)
       }
       else
       {
-         msgDbg(6, "Adaptation Field is too long!. No space left for PES header\n");
+         msgDbg(6, "Adaptation Field is too long!. No space left for PES header\r\n");
          return 0;
       }
       /* fall thru */
    case 1:
       if (memcmp(p, "\x00\x00\x01", 3))
       {
-         msgDbg(6, "no PES header found.\n");
+         msgDbg(6, "no PES header found.\r\n");
          return 0;
       }
       else
       {
-         msgDbg(4, "PES header found in packet\n");
+         msgDbg(4, "PES header found in packet\r\n");
          return 1;
       }
    case 2:
-      /* this should never happen as we have pusi packet here only */
-      msgDbg(4, "Packet has adapt.field but no payload!\n");
+      /* this should never happen as we have pusi packets here only */
+      msgDbg(4, "Packet has adapt.field but no payload!\r\n");
       return 0;
    default:
-      /* 00 is reserved and 01 should never happen as we have pusi packet here only */
-      msgDbg(4, "Illegal adaptation field value: %d\n", u8AFC);
+      /* 00 is reserved and 01 should never happen as we have pusi packets here only */
+      msgDbg(4, "Illegal adaptation field value: %d\r\n", u8AFC);
       return 0;
    }
 }
@@ -448,46 +464,50 @@ static int PacketHasPESHeader(unsigned char *pBuf)
 void DumpKey(const cw_t* CW, unsigned int num)
 {
    fprintf(stdout, "unsigned char pusi_%d_key[8] = {", num);
-   fprintf(stdout, "0x%02X, 0x%02X, 0x%02X, 0x%02X,  0x%02X, 0x%02X, 0x%02X, 0x%02X};\n",
+   fprintf(stdout, "0x%02X, 0x%02X, 0x%02X, 0x%02X,  0x%02X, 0x%02X, 0x%02X, 0x%02X};\r\n",
       CW->cw[0], CW->cw[1], CW->cw[2], CW->cw[3], 
       CW->cw[4], CW->cw[5], CW->cw[6], CW->cw[7]);
-   fprintf(stdout, "unsigned char pusi_%d_parity = %d;\n\n", num, CW->parity);
+   fprintf(stdout, "unsigned char pusi_%d_parity = %d;\r\n\r\n", num, CW->parity);
 }
 
 void DumpPacket(const unsigned char* pck, unsigned int num, unsigned char* name)
 {
    unsigned char i;
 
-   fprintf(stdout, "unsigned char pusi_%d_%s[188] = {\n", num, name);
+   fprintf(stdout, "unsigned char pusi_%d_%s[188] = {\r\n", num, name);
    fprintf(stdout, "0x%02X, 0x%02X, 0x%02X, 0x%02X, ", pck[0], pck[1], pck[2], pck[3]);
    for (i=4; i<PCKTSIZE-1; i++)
    {
-      if (!((i-4)%32)) fprintf(stdout, "\n", pck[i]);
+      if (!((i-4)%32)) fprintf(stdout, "\r\n", pck[i]);
       if ( (i-4)%32 && !((i-4)%8) ) fprintf(stdout, " ", pck[i]);
       fprintf(stdout, "0x%02X, ", pck[i]);
    }
-   fprintf(stdout, "0x%02X};\n\n", pck[PCKTSIZE-1]);
+   fprintf(stdout, "0x%02X};\r\n\r\n", pck[PCKTSIZE-1]);
 }
 #endif
 
-static int decryptCWL(void)
+int decryptCWL(void)
 {
-   int            par = 0, ret = 0, lastParity = -1, synced, syncedOnce, skipParity;
+   int            par = 0, ret = 0, lastParity = -1, synced, skipParity;
    unsigned char  pBuf[PCKTSIZE];
    unsigned int   gCWblockCntr_0 = 0;       /* for even CW */
    unsigned int   gCWblockCntr_1 = 0;       /* for odd CW */
    unsigned long  time_start = 0, pps;
    float          deltatime, MBps;
+   unsigned char  u8EncryptedPacketFound;
 
 
-   synced = 0; syncedOnce = 0; skipParity = 0;
-   msgDbg(2, "trying to sync...\n");
+   synced = 0; u8SyncCnt = 0; skipParity = 0;
+   msgDbg(2, "trying to sync...\r\n");
 
    gCurrentPacket = 0;
-   while (!(ret=read_packet()))
+   u8CancelDecryption = 0;
+   u8EncryptedPacketFound = 0;
+   while ( RET_OK==(ret=read_packet()) && !u8CancelDecryption )
    {
       if (IsEncryptedPacket)
       {
+         u8EncryptedPacketFound = 1;
          if (!synced)
          {
             /* only PUSI packets are checked. If skipParity is set to 1 (we have already 
@@ -508,7 +528,10 @@ static int decryptCWL(void)
                   csa_decrypt(pBuf);
                   if (PacketHasPESHeader(pBuf))
                   {
-                     synced = 1; syncedOnce = 1;
+                     synced = 1; 
+                     /* we start time measure at first sync. If ts has undecryptable parts, the calculated MB/s throughput will be wrong */
+                     if (!u8SyncCnt) time_start = GetTickCount();  /* start time measure */
+                     u8SyncCnt<255?u8SyncCnt++:0;
                      lastParity = par;
                      if (!par)
                      {
@@ -518,15 +541,14 @@ static int decryptCWL(void)
                      {
                         gCWblockCntr_1 = gCWblocker;
                      }
-                     msgDbg(2,"sync at packet %lu. using CW #%d \"%d %02X %02X %02X %02X %02X %02X %02X %02X\"\n", gCurrentPacket, THIS_CW, gpCWcur->parity, gpCWcur->cw[0],gpCWcur->cw[1],gpCWcur->cw[2],gpCWcur->cw[3],gpCWcur->cw[4],gpCWcur->cw[5],gpCWcur->cw[6],gpCWcur->cw[7]);
+                     msgDbg(2,"sync at packet %lu. using CW #%d \"%d %02X %02X %02X %02X %02X %02X %02X %02X\"\r\n", gCurrentPacket, THIS_CW, gpCWcur->parity, gpCWcur->cw[0],gpCWcur->cw[1],gpCWcur->cw[2],gpCWcur->cw[3],gpCWcur->cw[4],gpCWcur->cw[5],gpCWcur->cw[6],gpCWcur->cw[7]);
                      /* write local buffer to outfile */
                      fwrite(pBuf, 1, PCKTSIZE, fpOutfile);
-                     time_start = GetTickCount();  /* start time measure */
                      break; /* leave gpCWcur at its value */
                   }
                   else
                   {
-                     msgDbg(4,"no PES header at PUSI packet %lu after decrpt with CW #%d\n", gCurrentPacket, THIS_CW);
+                     msgDbg(4,"no PES header at PUSI packet %lu after decrýpt with CW #%d\r\n", gCurrentPacket, THIS_CW);
                      continue;   /* try next cw */
                   }
                }  /* for CWs */
@@ -540,7 +562,7 @@ static int decryptCWL(void)
          }  /* if (!synced) */
          else
          {  /* we are in sync */
-            /*msgDbg(6, "B0 %d, B1 %d  LP %d CP %d\n", gCWblockCntr_0, gCWblockCntr_1, lastParity, GetPacketParity);*/
+            /*msgDbg(6, "B0 %d, B1 %d  LP %d CP %d\r\n", gCWblockCntr_0, gCWblockCntr_1, lastParity, GetPacketParity);*/
             if (GetPacketParity != lastParity)
             {
                if (  (!GetPacketParity && !gCWblockCntr_0) ||
@@ -554,7 +576,7 @@ static int decryptCWL(void)
                      if (GetPacketParity == gpCWcur->parity)
                      {
                         lastParity = gpCWcur->parity;
-                        msgDbg(2, "packet %lu. using CW #%d \"%d %02X %02X %02X %02X %02X %02X %02X %02X\"\r", gCurrentPacket, THIS_CW, gpCWcur->parity, gpCWcur->cw[0],gpCWcur->cw[1],gpCWcur->cw[2],gpCWcur->cw[3],gpCWcur->cw[4],gpCWcur->cw[5],gpCWcur->cw[6],gpCWcur->cw[7]);
+                        msgDbg(2, "packet %lu. using CW #%d \"%d %02X %02X %02X %02X %02X %02X %02X %02X\"\r\n", gCurrentPacket, THIS_CW, gpCWcur->parity, gpCWcur->cw[0],gpCWcur->cw[1],gpCWcur->cw[2],gpCWcur->cw[3],gpCWcur->cw[4],gpCWcur->cw[5],gpCWcur->cw[6],gpCWcur->cw[7]);
                         csa_key_set(gpCWcur->cw, gpCWcur->parity);
                         if (lastParity)
                         {
@@ -572,20 +594,20 @@ static int decryptCWL(void)
                      }
                      else
                      {
-                        msgDbg(4, "skipping CW#%d. Parity %d needed.\n", THIS_CW, GetPacketParity);
+                        msgDbg(4, "skipping CW#%d. Parity %d needed.\r\n", THIS_CW, GetPacketParity);
                      }
                   }
                   /*else*/
                   if (gpCWcur == (gpCWlast-1) )
                   {
-                     msgDbg(2, "no more CWs available for decryption! CWL file too short?\n");
+                     msgDbg(2, "no more CWs available for decryption! CWL file too short?\r\n");
                      return RET_OUTOFCWS;
                   }
                }
                else
                {
                   /* parity changed within blocking delay for this parity -> keep old cw */
-                  msgDbg(4, "parity change to %d at packet %lu blocked.\n",
+                  msgDbg(4, "parity change to %d at packet %lu blocked.\r\n",
                      GetPacketParity,
                      gCurrentPacket);
                }
@@ -599,7 +621,7 @@ static int decryptCWL(void)
             {
                if (!PacketHasPESHeader(gpBuf)) 
                {
-                  msgDbg(2,"lost sync at packet %lu. Outfile may not be playable. Trying resync.\n", gCurrentPacket);
+                  msgDbg(2,"lost sync at packet %lu. Trying resync.\r\n", gCurrentPacket);
                   synced = 0;
                }
             }
@@ -616,13 +638,27 @@ static int decryptCWL(void)
       }
    }  /* while (!read_packet()) */
 
-   if (ret != RET_EOF) return ret;
+   if (u8CancelDecryption) 
+   {
+      msgDbg(2, "decryption canceled.\r\n");
+      return RET_OK;
+   }
+
+   /* direct return if read_packet failed */
+   if ( (ret==RET_TSCORRUPT) || (ret==RET_OK) ) return ret;
+
+   if (!u8EncryptedPacketFound)
+   {
+      msgDbg(2, "end of TS input file reached. Input stream has no encrypted content\r\n");
+      return RET_NOTCRYPTED;
+   }
 
    /* no more data from infile */
-   if (syncedOnce)
+   if (u8SyncCnt)
    {
       /* read_packet finished without error /*/
-      msgDbg(2, "end of TS input file reached. Total number of packets: %lu.\n", gCurrentPacket);
+      msgDbg(2, "end of TS input file reached. Total number of packets: %lu.\r\n", gCurrentPacket);
+      if (u8SyncCnt>1) msgDbg(2, "resynced %d time(s). Decrypted stream has discontinuity and may be unplayable.\r\n", u8SyncCnt-1);
 
       /* stop time measure */
       deltatime   = (float)(GetTickCount() - time_start ) / 1000;
@@ -630,11 +666,11 @@ static int decryptCWL(void)
       {
          pps         = gCurrentPacket * 1024 / (int)(deltatime*1024);
          MBps        = (float)pps * PCKTSIZE / (1024*1024);
-         msgDbg(2, "total time %.2fs (%lu packets/s, %.2f MB/s)\n", deltatime, pps, MBps);
+         msgDbg(2, "total time %.2fs (%lu packets/s, %.2f MB/s)\r\n", deltatime, pps, MBps);
       }
       else
       {
-         msgDbg(2, "total time %.2fs\n", deltatime);
+         msgDbg(2, "total time 0 s\r\n");
       }
 
       /* close files */
@@ -642,7 +678,7 @@ static int decryptCWL(void)
    }
    else
    {
-      msgDbg(2, "could not sync CWL to TS, sorry.");
+      msgDbg(2, "Decryption failed. Could not sync CWL to TS, sorry.");
       /* close files */
       return RET_NOSYNC;
    }
@@ -655,7 +691,7 @@ static int performCCW(unsigned char encrypt)
    /*gUsePreEncryption = 1;*/
    csa_key_set(gcwEnc_0.cw, gcwEnc_0.parity);
    csa_key_set(gcwEnc_1.cw, gcwEnc_1.parity);
-   msgDbg(4,"constant CW even: %02X %02X %02X %02X %02X %02X %02X %02X  odd: %02X %02X %02X %02X %02X %02X %02X %02X \n", gcwEnc_0.cw[0], gcwEnc_0.cw[1], gcwEnc_0.cw[2], gcwEnc_0.cw[3], gcwEnc_0.cw[4], gcwEnc_0.cw[5], gcwEnc_0.cw[6], gcwEnc_0.cw[7], gcwEnc_1.cw[0], gcwEnc_1.cw[1], gcwEnc_1.cw[2], gcwEnc_1.cw[3], gcwEnc_1.cw[4], gcwEnc_1.cw[5], gcwEnc_1.cw[6], gcwEnc_1.cw[7]);
+   msgDbg(4,"constant CW even: %02X %02X %02X %02X %02X %02X %02X %02X  odd: %02X %02X %02X %02X %02X %02X %02X %02X \r\n", gcwEnc_0.cw[0], gcwEnc_0.cw[1], gcwEnc_0.cw[2], gcwEnc_0.cw[3], gcwEnc_0.cw[4], gcwEnc_0.cw[5], gcwEnc_0.cw[6], gcwEnc_0.cw[7], gcwEnc_1.cw[0], gcwEnc_1.cw[1], gcwEnc_1.cw[2], gcwEnc_1.cw[3], gcwEnc_1.cw[4], gcwEnc_1.cw[5], gcwEnc_1.cw[6], gcwEnc_1.cw[7]);
 
    while (!(ret=read_packet()))
    {
@@ -675,14 +711,65 @@ static int performCCW(unsigned char encrypt)
    } /* while */
    if (ret == RET_EOF) ret = RET_OK;
    return ret;
-
 }
 
+unsigned char open_input_file(unsigned char *ifile)
+{
+   size_t   len;
+
+   if (!ifile) return RET_INFILE_NOTOPEN;
+
+   if(!(fpInfile = fopen(ifile, "rb" )))
+   {
+      msgDbg(0, "input file open failed.");
+      return(RET_INFILE_NOTOPEN);
+   }
+   else
+   {
+      fseek(fpInfile, 0, SEEK_END);
+      len = ftell(fpInfile);
+      fseek(fpInfile, 0, SEEK_SET);
+      if (len%PCKTSIZE)
+      {
+         msgDbg(2, "size of input ts file (%d) is not multiple of %d! (%d packets and %d garbage). TS file may be corrupt!\r\n", len, PCKTSIZE, len/PCKTSIZE, len%PCKTSIZE);
+      }
+      gNumberOfPackets = len/PCKTSIZE; /* FIXME: possible overflow when gNumberOfPackets is only 32 bits wide. Will crash with files > 752GB*/
+   }
+   return RET_OK;
+}
+
+void close_input_file(void) 
+{
+   if (fpInfile) fclose(fpInfile);
+}
+
+unsigned char open_output_file(unsigned char *ofile)
+{
+   if (!ofile) return RET_OUTFILEOPEN;
+   if ( !(fpOutfile = fopen(ofile, "w+b")) )
+   {
+      msgDbg(0, "output file open failed: %s\r\n", ofile);
+      return(RET_OUTFILEOPEN);
+   }
+
+   msgDbg(2, "writing decrypted stream to %s\r\n", ofile);
+   return RET_OK;
+}
+
+void close_output_file(void) 
+{
+   if (fpOutfile) fclose(fpOutfile);
+}
+
+
+#ifndef _WINDOWS
 int main(int argc, char **argv)
 {
    int      c, upper, ret;
+	char analyzeflag=0;
+   
    char     *p, *cwfile=0, *ofile=0, *ifile=0, *ccwstring=0;
-   size_t   len;
+/*   size_t   len;*/
    unsigned char ccw[16], encryptWithCCW = 0;
 
    while ((p = *++argv) != 0 && *p++ == '-') {
@@ -728,7 +815,7 @@ int main(int argc, char **argv)
             {
                use("-b wrong argument.");
             }
-            msgDbg(4, "using cw change blocker: %d\n", gCWblocker);
+            msgDbg(4, "using cw change blocker: %d\r\n", gCWblocker);
             break;
          case 'a':
             analyzeflag=1;
@@ -738,43 +825,24 @@ int main(int argc, char **argv)
             use(0);
             break;
          default:
-            msgDbg(2, "+++ unknown option: %c\n", c);
+            msgDbg(2, "+++ unknown option: %c\r\n", c);
             use(0);
       }
    } /* while arg */
 
    while (*argv) {
-      msgDbg(2, "parameter ignored: %s\n", *argv++);
+      msgDbg(2, "parameter ignored: %s\r\n", *argv++);
    }
    if (argc<2) use(0);
 
 
+#ifdef CSA_SELFTEST_ENABLED
    if ( (ret=PerformSelfTest()) == RET_SELFTESTFAILED) exit(ret);
+#endif
 
    /* input file is always needed */
-   if (ifile)
-   {
-      if(!(fpInfile = fopen(ifile, "rb" )))
-      /*if( (fopen_s( &fpInfile, ifile, "rb" )) !=0 )*/
-      {
-         msgDbg(0, "file open failed: %s", ifile);
-         exit(RET_INFILEOPEN);
-      }
-      else
-      {
-         fseek(fpInfile, 0, SEEK_END);
-         len = ftell(fpInfile);
-         fseek(fpInfile, 0, SEEK_SET);
-         if (len%PCKTSIZE)
-         {
-            msgDbg(2, "size of input file %s (%d) is not multiple of %d! (%d packets and %d garbage). TS file may be corrupt!\n", ifile, len, PCKTSIZE, len/PCKTSIZE, len%PCKTSIZE);
-         }
-      }
-   }
-   else
-   {
-      use("no input file given");
-   }
+   if (!ifile) use("no input file given");
+   if(open_input_file(ifile)) exit(RET_INFILE_NOTOPEN);
 
    if (analyzeflag)
    {
@@ -784,18 +852,8 @@ int main(int argc, char **argv)
    }
 
    /* process output file */
-   if (ofile) {
-      if ( !(fpOutfile = fopen(ofile, "w+b")) )
-      /*if ( fopen_s(&fpOutfile, ofile, "w+b") != 0 )*/
-      {
-         msgDbg(0, "file open failed: %s", ofile);
-         exit(RET_OUTFILEOPEN);
-      }
-   }
-   else
-   {
-      use("no output file given");
-   }
+   if (!ofile) use("no output file given");
+   if (open_output_file(ofile)) exit(RET_OUTFILEOPEN);
 
    SetPriorityClass(GetCurrentProcess(), BELOW_NORMAL_PRIORITY_CLASS);
 
@@ -815,9 +873,9 @@ int main(int argc, char **argv)
                (ccw[11] != ((ccw[8] + ccw[9] + ccw[10])&0xFF))   ||
                (ccw[15] != ((ccw[12]+ ccw[13]+ ccw[14])&0xFF)) )
          {
-            msgDbg(2,"checksum errors in constant CW detected!\n");
+            msgDbg(2,"checksum errors in constant CW detected!\r\n");
          }
-         msgDbg(2,"%scrypting with constant CW\n", encryptWithCCW?"en":"de");
+         msgDbg(2,"%scrypting with constant CW\r\n", encryptWithCCW?"en":"de");
 
          gcwEnc_0.parity = 0;
          memcpy(gcwEnc_0.cw, &ccw[0], 8);
@@ -832,15 +890,15 @@ int main(int argc, char **argv)
    /* process CWL file */
    if (!cwfile) use("-f cwfile not found.");
    if ( (ret = load_cws(cwfile)) != 0) {
-      if (gpCWs) free(gpCWs);
-      msgDbg(2,"cannot load CWL file %s\n", cwfile);
+      unload_cws();
+      msgDbg(2,"cannot load CWL file %s\r\n", cwfile);
       return RET_CWLOPEN;
    }
 
 
    ret = decryptCWL();
 
-   if (gpCWs) free(gpCWs);
+   unload_cws();
    return ret;
 }
 
@@ -848,30 +906,30 @@ static void use(const char *txt)
 {
    if (txt)
    {
-      msgDbg(2,"error: %s\n",  txt);
+      msgDbg(2,"error: %s\r\n",  txt);
    }
    else
    {
-      fprintf(stderr, "%s %s  Build:%s %s.\n",gProgname, version, __DATE__, __TIME__);
-      fprintf(stderr, "%s decrypts recorded DVB transport streams (TS) using \na control word log (CWL) file.\n\n",gProgname);
-      fprintf(stderr, "usage:\n%s [-f cwlfile] [-v n] [-a] -i inputfile [-o outputfile] [-e|-d cw]\n\n", gProgname);
-      /*fprintf(stderr, "  If no output file is given, write to stdout.\n\n");*/
-      fprintf(stderr, "    -f cwlfile    use cwlfile to decrypt transport stream\n");
-      fprintf(stderr, "    -i inputfile  encrypted recorded transport stream to be decrypted\n");
-      fprintf(stderr, "    -o outfile    decrypted output file\n");
-      fprintf(stderr, "    -v n          verbose level n (0..9) higher number for more debug info [2]\n");
-      fprintf(stderr, "    -a            analyze the PIDs of input file only. No decryption is done\n");
-      fprintf(stderr, "    -d cw         decrypt TS with constant cw\n");
-      fprintf(stderr, "    -e cw         encrypt scrambled packets in TS with constant cw. See readme.\n");
-      fprintf(stderr, "                  cw = \"EE EE EE EE EE EE EE EE OO OO OO OO OO OO OO OO\"\n");
-      fprintf(stderr, "    -b  n         blocks the usage of the next cw for n packets. [300]\n");
-      fprintf(stderr, "\n");
-      fprintf(stderr, "    debug messages are printed to stderr. for logging use 2>log.txt\n");
-      fprintf(stderr, "\n");
-      fprintf(stderr, "  Examples:\n");
-      fprintf(stderr, "    tsdec -f logged_cws.cwl -i recording.ts -o decrypted.ts\n");
-      fprintf(stderr, "    tsdec -a -i recording.ts\n");
+      fprintf(stderr, "%s %s  Build:%s %s.\r\n",szProgname, szVersion, __DATE__, __TIME__);
+      fprintf(stderr, "%s decrypts recorded DVB transport streams (TS) using \r\na control word log (CWL) file.\r\n\r\n",szProgname);
+      fprintf(stderr, "usage:\r\n%s [-f cwlfile] [-v n] [-a] -i inputfile [-o outputfile] [-e|-d cw]\r\n\r\n", szProgname);
+      /*fprintf(stderr, "  If no output file is given, write to stdout.\r\n\r\n");*/
+      fprintf(stderr, "    -f cwlfile    use cwlfile to decrypt transport stream\r\n");
+      fprintf(stderr, "    -i inputfile  encrypted recorded transport stream to be decrypted\r\n");
+      fprintf(stderr, "    -o outfile    decrypted output file\r\n");
+      fprintf(stderr, "    -v n          verbose level n (0..9) higher number for more debug info [2]\r\n");
+      fprintf(stderr, "    -a            analyze the PIDs of input file only. No decryption is done\r\n");
+      fprintf(stderr, "    -d cw         decrypt TS with constant cw\r\n");
+      fprintf(stderr, "    -e cw         encrypt scrambled packets in TS with constant cw. See readme.\r\n");
+      fprintf(stderr, "                  cw = \"EE EE EE EE EE EE EE EE OO OO OO OO OO OO OO OO\"\r\n");
+      fprintf(stderr, "    -b  n         blocks the usage of the next cw for n packets. [300]\r\n");
+      fprintf(stderr, "\r\n");
+      fprintf(stderr, "    debug messages are printed to stderr. for logging use 2>log.txt\r\n");
+      fprintf(stderr, "\r\n");
+      fprintf(stderr, "  Examples:\r\n");
+      fprintf(stderr, "    tsdec -f logged_cws.cwl -i recording.ts -o decrypted.ts\r\n");
+      fprintf(stderr, "    tsdec -a -i recording.ts\r\n");
    }
    exit(RET_USAGE);
 }
-
+#endif

@@ -1,0 +1,20 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 10.00
+# Visual C++ Express 2008
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "tsdec", "tsdec_gui.vcproj", "{22D31837-065A-4552-BDB1-BF3224926BC6}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Win_Debug|Win32 = Win_Debug|Win32
+		Win_Release|Win32 = Win_Release|Win32
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{22D31837-065A-4552-BDB1-BF3224926BC6}.Win_Debug|Win32.ActiveCfg = Win_Debug|Win32
+		{22D31837-065A-4552-BDB1-BF3224926BC6}.Win_Debug|Win32.Build.0 = Win_Debug|Win32
+		{22D31837-065A-4552-BDB1-BF3224926BC6}.Win_Release|Win32.ActiveCfg = Winapp|Win32
+		{22D31837-065A-4552-BDB1-BF3224926BC6}.Win_Release|Win32.Build.0 = Winapp|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

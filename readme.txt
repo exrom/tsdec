@@ -3,11 +3,11 @@ TSDEC - the transport stream offline decrypter
 ######################################################
 
 
-Now what is TSDEC?
+What is TSDEC?
 -------------------
-It is a small command line program that decrypts recorded DVB transport stream 
-files (*.ts) with the recorded control words from a CWL file using the common 
-scrambling algorithm.
+It is a program that decrypts recorded DVB transport stream files (*.ts) 
+with the recorded control words from a CWL file using the common scrambling 
+algorithm.
 
 
 The idea:
@@ -43,13 +43,19 @@ only.
 How to use:
 ------------------
 1. Record a TS file from an encrypted channel and make sure the CWs are logged 
-by someone else at the same time. For testing purposes you may record the CWs 
-yourself on another device. Recording works best with budget DVB cards. With FF 
-cards or set top boxes you may not get a clean stream (explanation see below). 
-DVBdream is a good program for recording. In the CWlogging directory are some 
-scripts to log cws on the client side.
+by someone else at the same time. You may search the web for websites providing
+cwl files for tsdec offline decrypter. If you own a card server you can log cws
+to cwl files. For examle oscam supports cw logging.
+For testing purposes you may record the CWs yourself on another device. 
+Recording works best with budget DVB cards. With FF cards or set top boxes you 
+may not get a clean stream (explanation see below). DVBdream is a good program 
+for recording. In the CWlogging directory are some scripts to log cws on the 
+client side.
 
-2. start TSDEC on the dos command prompt like this:
+2. Run tsdec_gui.exe and select the encrypted transport stream file (e.g. 
+recording.ts) and the control word log file (e.g. logfile.cwl) in the file open 
+dialog and click "Decrypt". 
+You can also use the command line version tsdec.exe. then you have to type:
 TSDEC -f logfile.CWL -i recording.ts -o recording_decrypted.ts
 
 TSDEC will now try to sync, meaning trying to find TS packets matching to a 
@@ -58,10 +64,11 @@ program and time, you see "sync at packet..." and tsdec should write the
 decrypted file recording_decrypted.ts on your disk. 
 TSDEC will tell you if the transport stream is corrupt or the CWL is not well 
 formated. 
-You may test decryption process with the example cwl and ts files.
+You may test decryption process with the example cwl and ts files, however this
+stream does not contain any playable content.
 
-3. Watch recording_decrypted.ts with a media player which supports ts. Vlc is a 
-good choice.
+3. Watch recording_decrypted.ts with a media player which supports ts. Vlc or 
+SMPlayer are a good choice.
 
 
 How does TSDEC work?
@@ -89,12 +96,13 @@ stream) and if the CW changes very often. Use greater value if parity toggles
 for a longer time and tsdec accidently uses the next cw from cwl file. 
 Default: 300
 If another pusi packet comes along while synced, the correct decryption is 
-checked again. If the decryption fails (ts corrupt, missing or wrong CWs in cwl) 
-the packet is tried to be decrypted with all other cws again (resync). 
-Unfortunately there will be a short freeze in the decrypted video then.
+checked again. If the decryption fails (ts corrupt, missing or wrong CWs in cwl 
+or the cw sequence got mixed up while logging) the packet is tried to be 
+decrypted with all other cws again (resync). Unfortunately there will be a short 
+freeze in the decrypted video then. 
 
-Tsdec can encrypt and decrypt streams with a constant cw. Decryption can be used 
-to decrypt certain crypt systems like biss. 
+Tsdec can encrypt and decrypt streams with a constant cw (cammnd line version 
+only). Decryption can be used to decrypt certain crypt systems like biss. 
 Encryption with constant CW may be used for recordings from full featured DVB
 cards or set top boxes. Such devices with hardware based CSA decryption maybe
 unable to record an encrypted TS without decrypting it (e.g. the dBox 2). 
@@ -141,10 +149,12 @@ line in the top of the cwl.
   
 Limitations, things to be done:
 --------------------------------
+- the GUI version does only basic decryption and does not (yet) support the 
+  additional features like constant CW, analyzing, blocker, verbose setting.
 - usage of the csa bitslice implementation (FFdecsa) of LIBDVBCSA for speed up.
-- fool-proof GUI. Error codes are exported already.
 - on the fly encryption (constant CW) -> decryption (cw from CWL) without 
   the need of a temp ts file.
+- resync on malformed ts inut file.
 - possibility for direct playing by passing the decrypted data to stdout. Does 
   this need anyone? 
 - Only one service is allowed in the ts file. If encrypted packets from more 

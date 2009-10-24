@@ -1,91 +1,74 @@
-# TSDEC
-# Makefile for native mingw32 under win32
+# TSDEC Makefile for MinGW 5.1.4
 
-#
-# Compiler command definitions
-#
 CC          = gcc
 LD          = gcc
 RM          = rm
 
-# use these flags for release
-CFLAGS      = -Wall -W -Wno-unused -O3
-CPPFLAGS    = #-DWIN32_VERSION -I.
-#LDFLAGS     = -liberty
+CFLAGS      = -Wall -W -O3
 
-# use these flags for debugging 
-#CFLAGS      = -Wall -W -Wno-format -Wno-unused -g
-#CPPFLAGS    = -DWIN32_VERSION -I. -DECHO_FUNCTION_CALL
-#LDFLAGS     = -g -liberty
+obj/%.o : %.c
+	$(CC) -c $(CFLAGS) -o obj/$*.o $*.c
+obj/%.o : dvbcsa/%.c
+	$(CC) -c $(CFLAGS) -o obj/$*.o dvbcsa/$*.c
 
-objdir      = obj
-dvbcsadir   = dvbcsa
-              
-#
-# Pattern rules to make the .o files end up in directory o
-#
-$(objdir)/%.o : %.c
-	$(CC) -c $(CPPFLAGS) $(CFLAGS) -o $(objdir)/$*.o $*.c
-$(objdir)/%.o : $(dvbcsadir)/%.c
-	$(CC) -c $(CPPFLAGS) $(CFLAGS) -o $(objdir)/$*.o $(dvbcsadir)/$*.c
-
-#
-# 
-#
+objgui/%.o : %.c
+	$(CC) -D _WINDOWS -c $(CFLAGS) -o objgui/$*.o $*.c
+objgui/%.o : dvbcsa/%.c
+	$(CC) -D _WINDOWS -c $(CFLAGS) -o objgui/$*.o dvbcsa/$*.c
 
 
-TARGET1 = tsdec.exe
-OBJS1 =  $(objdir)/csa.o                    \
-         $(objdir)/tsdec.o                  \
-         $(objdir)/dvbcsa_algo.o            \
-         $(objdir)/dvbcsa_block.o           \
-         $(objdir)/dvbcsa_bs_algo.o         \
-         $(objdir)/dvbcsa_bs_block.o        \
-         $(objdir)/dvbcsa_bs_key.o          \
-         $(objdir)/dvbcsa_bs_stream.o       \
-         $(objdir)/dvbcsa_bs_transpose.o    \
-         $(objdir)/dvbcsa_bs_transpose32.o  \
-         $(objdir)/dvbcsa_stream.o          
+TARGETCL		= ../tsdec
+TARGETGUI	= ../tsdec_gui
+TARGETS =  $(TARGETCL) $(TARGETGUI)
+OBJSCL  =  obj/csa.o                    \
+           obj/tsdec.o                  \
+           obj/dvbcsa_algo.o            \
+           obj/dvbcsa_block.o           \
+           obj/dvbcsa_bs_algo.o         \
+           obj/dvbcsa_bs_block.o        \
+           obj/dvbcsa_bs_key.o          \
+           obj/dvbcsa_bs_stream.o       \
+           obj/dvbcsa_bs_transpose.o    \
+           obj/dvbcsa_bs_transpose32.o  \
+           obj/dvbcsa_stream.o          
 
-## fixa!
+OBJSGUI =  objgui/csa.o                    \
+           objgui/tsdec.o                  \
+           objgui/dvbcsa_algo.o            \
+           objgui/dvbcsa_block.o           \
+           objgui/dvbcsa_bs_algo.o         \
+           objgui/dvbcsa_bs_block.o        \
+           objgui/dvbcsa_bs_key.o          \
+           objgui/dvbcsa_bs_stream.o       \
+           objgui/dvbcsa_bs_transpose.o    \
+           objgui/dvbcsa_bs_transpose32.o  \
+           objgui/dvbcsa_stream.o          \
+           objgui/tsdecgui.o               \
+           objgui/icon.o
+
+
+all:	$(TARGETS)
+
+objgui/icon.o : rc.rc
+	windres rc.rc objgui/icon.o
+         
 HEADERS = csa.h csa_testcases.h      \
    dvbcsa\config.h dvbcsa\dvbcsa.h dvbcsa\dvbcsa_bs.h dvbcsa\dvbcsa_bs_altivec.h \
    dvbcsa\dvbcsa_bs_mmx.h dvbcsa\dvbcsa_bs_sse.h dvbcsa\dvbcsa_bs_uint32.h \
    dvbcsa\dvbcsa_bs_uint64.h dvbcsa\dvbcsa_pv.h
 	
-#
-# Build EXE
-#
-$(TARGET1): $(OBJS1) makefile
-	$(LD) -o $(TARGET1) $(OBJS1) $(LDFLAGS)
+# Build command line excecutable
+$(TARGETCL): $(OBJSCL) 
+	$(LD) -o $(TARGETCL) $(OBJSCL)
+cl: $(TARGETCL)
 
-#
-# Rules for the object files
-#
+# Build grahpical excecutable
+$(TARGETGUI): $(OBJSGUI) 
+	$(LD) -mwindows -o $(TARGETGUI) $(OBJSGUI)
+gui: $(TARGETGUI)
 
-$(objdir)/csa.o:                        csa.c											$(HEADERS)
-$(objdir)/tsdec.o:                      tsdec.c											$(HEADERS)
-$(objdir)/dvbcsa_algo.o:                $(dvbcsadir)/dvbcsa_algo.c				$(HEADERS)
-$(objdir)/dvbcsa_block.o:               $(dvbcsadir)/dvbcsa_block.c				$(HEADERS)
-$(objdir)/dvbcsa_bs_algo.o:             $(dvbcsadir)/dvbcsa_bs_algo.c			$(HEADERS)
-$(objdir)/dvbcsa_bs_block.o:            $(dvbcsadir)/dvbcsa_bs_block.c         $(HEADERS)
-$(objdir)/dvbcsa_bs_key.o:              $(dvbcsadir)/dvbcsa_bs_key.c           $(HEADERS)
-$(objdir)/dvbcsa_bs_stream.o:           $(dvbcsadir)/dvbcsa_bs_stream.c        $(HEADERS)
-$(objdir)/dvbcsa_bs_transpose.o:        $(dvbcsadir)/dvbcsa_bs_transpose.c     $(HEADERS)
-$(objdir)/dvbcsa_bs_transpose128.o:     $(dvbcsadir)/dvbcsa_bs_transpose128.c  $(HEADERS)
-$(objdir)/dvbcsa_bs_transpose32.o:      $(dvbcsadir)/dvbcsa_bs_transpose32.c   $(HEADERS)
-$(objdir)/dvbcsa_bs_transpose64.o:      $(dvbcsadir)/dvbcsa_bs_transpose64.c   $(HEADERS)
-$(objdir)/dvbcsa_stream.o:              $(dvbcsadir)/dvbcsa_stream.c           $(HEADERS)
 
-#
-# Remove EXE and object files and backup files
-#
 clean:
-	$(RM) $(TARGET1) $(objdir)/*.o
-
-all:	$(TARGET1)
-
-#install: $(TARGET1)
-#	cp $(TARGET1) ../bin
-#	strip ../bin/$(TARGET1)
+#	$(RM) $(TARGETCL) $(TARGETGUI) $(objdir)/*.o
+	$(RM) $(TARGETCL).exe $(TARGETGUI).exe obj/*.o objgui/*.o
 
