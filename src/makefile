@@ -1,8 +1,9 @@
-# TSDEC Makefile for MinGW 5.1.4
+# TSDEC makefile for gcc
+
+.PHONY : all clean
 
 CC          = gcc
 LD          = gcc
-RM          = rm
 
 CFLAGS      = -Wall -W -O3
 
@@ -16,11 +17,9 @@ objgui/%.o : %.c
 objgui/%.o : dvbcsa/%.c
 	$(CC) -D _WINDOWS -c $(CFLAGS) -o objgui/$*.o dvbcsa/$*.c
 
-
-TARGETCL		= ../tsdec
-TARGETGUI	= ../tsdec_gui
-TARGETS =  $(TARGETCL) $(TARGETGUI)
-OBJSCL  =  obj/csa.o                    \
+TSDEC     = ../tsdec
+TSDECGUI  = ../tsdec_gui
+OBJS    =  obj/csa.o                    \
            obj/tsdec.o                  \
            obj/dvbcsa_algo.o            \
            obj/dvbcsa_block.o           \
@@ -30,7 +29,7 @@ OBJSCL  =  obj/csa.o                    \
            obj/dvbcsa_bs_stream.o       \
            obj/dvbcsa_bs_transpose.o    \
            obj/dvbcsa_bs_transpose32.o  \
-           obj/dvbcsa_stream.o          
+           obj/dvbcsa_stream.o
 
 OBJSGUI =  objgui/csa.o                    \
            objgui/tsdec.o                  \
@@ -46,29 +45,20 @@ OBJSGUI =  objgui/csa.o                    \
            objgui/tsdecgui.o               \
            objgui/icon.o
 
+all: $(TSDEC)
 
-all:	$(TARGETS)
+# Build command line excecutable
+$(TSDEC): $(OBJS)
+	$(LD) -o $(TSDEC) $(OBJS)
+
+# Build grahpical executable for win32
+$(TSDECGUI): $(OBJSGUI) 
+	$(LD) -mwindows -o $(TSDECGUI) $(OBJSGUI)
+gui: $(TSDECGUI)
 
 objgui/icon.o : rc.rc
 	windres rc.rc objgui/icon.o
          
-HEADERS = csa.h csa_testcases.h      \
-   dvbcsa\config.h dvbcsa\dvbcsa.h dvbcsa\dvbcsa_bs.h dvbcsa\dvbcsa_bs_altivec.h \
-   dvbcsa\dvbcsa_bs_mmx.h dvbcsa\dvbcsa_bs_sse.h dvbcsa\dvbcsa_bs_uint32.h \
-   dvbcsa\dvbcsa_bs_uint64.h dvbcsa\dvbcsa_pv.h
-	
-# Build command line excecutable
-$(TARGETCL): $(OBJSCL) 
-	$(LD) -o $(TARGETCL) $(OBJSCL)
-cl: $(TARGETCL)
-
-# Build grahpical excecutable
-$(TARGETGUI): $(OBJSGUI) 
-	$(LD) -mwindows -o $(TARGETGUI) $(OBJSGUI)
-gui: $(TARGETGUI)
-
-
 clean:
-#	$(RM) $(TARGETCL) $(TARGETGUI) $(objdir)/*.o
-	$(RM) $(TARGETCL).exe $(TARGETGUI).exe obj/*.o objgui/*.o
+	rm -f $(TSDEC) obj/*.o $(TSDECGUI) objgui/*.o
 

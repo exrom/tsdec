@@ -1,25 +1,23 @@
 #!/bin/sh
 #################################################################################
 #
-# CWlog  control word logger
+# CWlog  control word log
 #
-# CWLog reads the /tmp/ecm.info file repeatedly and writes the CWs to 
+# CWLog reads the /tmp/ecm.info file repeatedly and writes the CWs to
 # a CWL file for offline decryption.
 #
-# History:
-#
-# V1.2   11.01.09    alternating order of CW parity at start of log file
-# V1.1   17.12.08    replacement of CWx: case insensitive
-# V1.0   07.12.08    initial release
+# V1.0   08-12-07    initial release
+# V1.1   08-12-17    replacement of CWx: case insensitive
+# V1.2   09-01-11    alternating order of CW parity at start of log file
+# V1.3   10-08-30    replace spaces in file names + removed delta seconds
 #
 #################################################################################
 
-VER='CWlog V1.2' 
+VER='CWlog V1.3'
 
-IN="/tmp/ecm.info" 
-OUT_PRE="/tmp/"
-OUT_POST=".cwl" 
-POLLTIME=1   
+IN="/tmp/ecm.info"
+CWLOGDIR="/tmp"
+POLLTIME=1
 
 
 LINE1=""
@@ -29,9 +27,6 @@ CW1=""
 LASTLINE1=""
 LASTCW0=""
 LASTCW1=""
-TIMEPOSIX=""
-LASTTIMEPOSIX=-1
-SECDELTA=""
 
 echo $VER": logging started"
 
@@ -55,40 +50,32 @@ do
          rm /tmp/mylist
 
          #calculate new cwl file name
-         DATTIM=`date +"%y%m%d_%H%M%S_"`
-         OUT="$OUT_PRE$DATTIM$CHANNEL$OUT_POST"
-         
+         CHANNEL=`echo $CHANNEL|sed -e "s/ /_/g"`
+         OUT=`date +"$CWLOGDIR/%y%m%d_$CHANNEL.cwl"`
+
          LASTLINE1=$LINE1
          # the 1st two CWs cannot be written until parity of the 3rd is known
          # make the CW change detection fail for the first time
          LASTCW0=$CW0
          LASTCW1=$CW1
          INITIALCW=1
-         LASTTIMEPOSIX=-1
          date +"# $VER - logging of $CHANNEL started at: %D %T"  >>$OUT
          echo "# $LINE1"  >>$OUT
       fi
-      
+
       if [ "$LASTCW0" != "$CW0" ] || [ "$LASTCW1" != "$CW1" ] ; then
-         TIMEPOSIX=`date +"%s"`
-         if [ "$LASTTIMEPOSIX" != -1 ] ; then
-            SECDELTA=`expr $TIMEPOSIX - $LASTTIMEPOSIX`
-         else
-            SECDELTA=""
-         fi
-         LASTTIMEPOSIX=$TIMEPOSIX
-        
+
          if [ "$LASTCW0" != "$CW0" ] ; then
             #echo "new CW0 detected"
             if [ "$INITIALCW" != 0 ] ; then
-               # even CW did change first, -> CW order: 0,1,0 
+               # even CW did change first, -> CW order: 0,1,0
                echo $LASTCW0|sed s/CW0:/0/I >>$OUT
                echo $LASTCW1|sed s/CW1:/1/I >>$OUT
                INITIALCW=0;
             fi
             LASTCW0=$CW0
             CW0=`echo $CW0|sed s/CW0:/0/I`
-            date +"$CW0 # %T $SECDELTA"  >>$OUT  # this is current time and not time of $IN
+            date +"$CW0 # %T"  >>$OUT  # this is current time and not time of $IN
          fi
          if [ "$LASTCW1" != "$CW1" ]  ; then
             #echo "new CW1 detected"
@@ -100,10 +87,10 @@ do
             fi
             LASTCW1=$CW1
             CW1=`echo $CW1|sed s/CW1:/1/I`
-            date +"$CW1 # %T $SECDELTA"  >>$OUT  # this is current time and not time of $IN
+            date +"$CW1 # %T"  >>$OUT  # this is current time and not time of $IN
          fi
       fi # CW0 or CW1 changed
    fi # if [ -e $IN ]
    sleep $POLLTIME
 done    # while
-   
+

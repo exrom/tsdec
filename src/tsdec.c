@@ -19,6 +19,8 @@ this program; if not, see <http://www.gnu.org/licenses/>.
 File: tsdec.c
 
 History:
+V0.4.1   26.12.10    gcc support (without performance measure and priority setting)
+
 V0.4.0   25.10.09    added gui and small bugfixes
 
 V0.3.1   28.06.09    faster recync with repeated parity + mingw32 make
@@ -46,19 +48,19 @@ V0.1     09.12.08    initial revision based on cwldec 0.0.2
 
 ********************************************************************************/
 
-const char *szVersion    = "V0.4.0";
+const char *szVersion    = "V0.4.1";
 const char *szProgname  = "TSDEC";
 
 #include <stdio.h>
 #include <stdlib.h>        /* malloc */
 #include <string.h>
 #include <ctype.h>         /* isupper */
-#include <windows.h>       /* for SetPriorityClass() */
 
 #include "csa.h"
 #include "tsdec.h"
 
 #ifdef _WINDOWS
+#include <windows.h>       /* for SetPriorityClass() */
 #include "tsdecgui.h"
 #endif
 
@@ -130,11 +132,11 @@ static void use(const char *);
 #ifdef MSVC
 #define snprintf _snprintf
 #endif
-#define msgDbg(vl, ... )  															\
-  if ((vl)<=gVerboseLevel) 														\
-{ 																							\
-	 if ( snprintf(szDbgMsg, sizeof(szDbgMsg)-1, __VA_ARGS__) > 0 ) 	\
-	 WinMsgDbg(szDbgMsg);															\
+#define msgDbg(vl, ... ) \
+  if ((vl)<=gVerboseLevel) \
+{ \
+   if ( snprintf(szDbgMsg, sizeof(szDbgMsg)-1, __VA_ARGS__) > 0 ) \
+   WinMsgDbg(szDbgMsg); \
 }
 #else
 #define msgDbg(vl, ... ) if ((vl)<=gVerboseLevel) {fprintf(stderr, "%s: ",szProgname);fprintf(stderr, __VA_ARGS__);}
@@ -530,7 +532,9 @@ int decryptCWL(void)
                   {
                      synced = 1; 
                      /* we start time measure at first sync. If ts has undecryptable parts, the calculated MB/s throughput will be wrong */
+#ifdef _WINDOWS
                      if (!u8SyncCnt) time_start = GetTickCount();  /* start time measure */
+#endif
                      u8SyncCnt<255?u8SyncCnt++:0;
                      lastParity = par;
                      if (!par)
@@ -548,7 +552,7 @@ int decryptCWL(void)
                   }
                   else
                   {
-                     msgDbg(4,"no PES header at PUSI packet %lu after decrýpt with CW #%d\r\n", gCurrentPacket, THIS_CW);
+                     msgDbg(4,"no PES header at PUSI packet %lu after decrypt with CW #%d\r\n", gCurrentPacket, THIS_CW);
                      continue;   /* try next cw */
                   }
                }  /* for CWs */
@@ -661,6 +665,7 @@ int decryptCWL(void)
       if (u8SyncCnt>1) msgDbg(2, "resynced %d time(s). Decrypted stream has discontinuity and may be unplayable.\r\n", u8SyncCnt-1);
 
       /* stop time measure */
+#ifdef _WINDOWS
       deltatime   = (float)(GetTickCount() - time_start ) / 1000;
       if (deltatime)
       {
@@ -672,6 +677,7 @@ int decryptCWL(void)
       {
          msgDbg(2, "total time 0 s\r\n");
       }
+#endif
 
       /* close files */
       return RET_OK;
@@ -855,7 +861,9 @@ int main(int argc, char **argv)
    if (!ofile) use("no output file given");
    if (open_output_file(ofile)) exit(RET_OUTFILEOPEN);
 
+#ifdef _WINDOWS
    SetPriorityClass(GetCurrentProcess(), BELOW_NORMAL_PRIORITY_CLASS);
+#endif
 
    if (ccwstring)
    {
@@ -933,3 +941,4 @@ static void use(const char *txt)
    exit(RET_USAGE);
 }
 #endif
+

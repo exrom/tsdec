@@ -60,7 +60,7 @@ static HWND          hEditStatus;
 char     szInFile[260];
 char     szCWLFile[260];
 char     szOutFile[260];
-const char szAppName[]        = "TSDEC  The offline decrypter V0.4.0";
+const char szAppName[]        = "TSDEC  The offline decrypter V0.4.1";
 const char szClassName[]      = "TSDEC";
 const char  szTSIN[]          = "encrypted transport stream file";
 const char  szCWL[]           = "control word log file";

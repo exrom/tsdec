@@ -49,7 +49,7 @@ to cwl files. For examle oscam supports cw logging.
 For testing purposes you may record the CWs yourself on another device. 
 Recording works best with budget DVB cards. With FF cards or set top boxes you 
 may not get a clean stream (explanation see below). DVBdream is a good program 
-for recording. In the CWlogging directory are some scripts to log cws on the 
+for recording. In the logging_howto directory are some scripts to log cws on the 
 client side.
 
 2. Run tsdec_gui.exe and select the encrypted transport stream file (e.g. 
