@@ -268,7 +268,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
                /* open TS output file */
                GetWindowText(hEditTS, szOutFile, sizeof(szOutFile));
-               if ( !_stricmp(szOutFile+strlen(szOutFile)-strlen(szExt), szExt ) )
+               if ( !strcmp(szOutFile+strlen(szOutFile)-strlen(szExt), szExt ) )
                {
                   *(szOutFile+strlen(szOutFile)-strlen(szExt)) = 0; /* cut off ".ts" extension */
                }

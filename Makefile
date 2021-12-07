@@ -7,18 +7,18 @@ LD          = gcc
 
 CFLAGS      = -Wall -W -O3
 
-obj/%.o : %.c
-	$(CC) -c $(CFLAGS) -o obj/$*.o $*.c
-obj/%.o : dvbcsa/%.c
-	$(CC) -c $(CFLAGS) -o obj/$*.o dvbcsa/$*.c
+obj/%.o : src/%.c
+	mkdir -p obj && $(CC) -c $(CFLAGS) -o obj/$*.o src/$*.c
+obj/%.o : src/dvbcsa/%.c
+	mkdir -p obj && $(CC) -c $(CFLAGS) -o obj/$*.o src/dvbcsa/$*.c
 
-objgui/%.o : %.c
-	$(CC) -D _WINDOWS -c $(CFLAGS) -o objgui/$*.o $*.c
-objgui/%.o : dvbcsa/%.c
-	$(CC) -D _WINDOWS -c $(CFLAGS) -o objgui/$*.o dvbcsa/$*.c
+objgui/%.o : src/%.c
+	mkdir -p objgui && $(CC) -D _WINDOWS -c $(CFLAGS) -o objgui/$*.o src/$*.c
+objgui/%.o : src/dvbcsa/%.c
+	mkdir -p objgui && $(CC) -D _WINDOWS -c $(CFLAGS) -o objgui/$*.o src/dvbcsa/$*.c
 
-TSDEC     = ../tsdec
-TSDECGUI  = ../tsdec_gui
+TSDEC     = tsdec
+TSDECGUI  = tsdec_gui
 OBJS    =  obj/csa.o                    \
            obj/tsdec.o                  \
            obj/dvbcsa_algo.o            \
@@ -56,9 +56,9 @@ $(TSDECGUI): $(OBJSGUI)
 	$(LD) -mwindows -o $(TSDECGUI) $(OBJSGUI)
 gui: $(TSDECGUI)
 
-objgui/icon.o : rc.rc
-	windres rc.rc objgui/icon.o
+objgui/icon.o : src/rc.rc
+	windres src/rc.rc objgui/icon.o
          
 clean:
-	rm -f $(TSDEC) obj/*.o $(TSDECGUI) objgui/*.o
+	rm -rf $(TSDEC) $(TSDECGUI) obj objgui
 

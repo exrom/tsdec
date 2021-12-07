@@ -1,17 +1,15 @@
-######################################################
-TSDEC - the transport stream offline decrypter
-######################################################
+# TSDEC - the transport stream offline decrypter
 
 
-What is TSDEC?
--------------------
+## What is TSDEC?
+
 It is a program that decrypts recorded DVB transport stream files (*.ts) 
 with the recorded control words from a CWL file using the common scrambling 
 algorithm.
 
 
-The idea:
----------
+## The idea
+
 Remember "VCL" files from Videocrypt times? This is its successor for DVB.
 
 One party with a valid subscription card records the decrypted control words
@@ -25,8 +23,8 @@ the control word to the CAM and what the CAM does with it to decrypt the
 transport stream is always the same and independent from the crypt system used.
 
 
-Why offline decryption?
-------------------------
+## Why offline decryption
+
 Today, control words can be shared 'online' via cardsharing. Anonymous sharing 
 is not possible with this approach as the IP adress must be known by the sharing 
 partners. With offline decryption the CWL files may be uploaded and shared 
@@ -40,8 +38,8 @@ Perhaps it isn't, because - of course - it is released for educational purposes
 only. 
 
 
-How to use:
-------------------
+## How to use
+
 1. Record a TS file from an encrypted channel and make sure the CWs are logged 
 by someone else at the same time. You may search the web for websites providing
 cwl files for tsdec offline decrypter. If you own a card server you can log cws
@@ -71,8 +69,8 @@ stream does not contain any playable content.
 SMPlayer are a good choice.
 
 
-How does TSDEC work?
----------------------
+## How does TSDEC work
+
 When decrypting with a cwl file, tsdec first reads all cws into memory and 
 checks for alternating parity. It also checks for correct checksum at byte 4 
 and 8 and corrects it if necessary. 
@@ -87,8 +85,10 @@ change, the next cw from the cwl is used.
 When the parity changes e.g. from 0 to 1 the parity might toggle for some time 
 until it changes finally to 1. This is an audio/video muxing problem on some 
 transmissions. The stream might look like this:
+```
 VVVVVAVVVVVVAVVVVVVAVVVVVVAVVVVVVAVVVVVVAVVVVVVAVVVVVVAVVVVVVV
 00000000000010000001000000100000010000111111111111111111111111
+```
 The cw change blocker (-b) supresses the usage of a new cw from the CWL for each 
 parity if it happens after less than n packets. The value must be decreased if 
 the bit rate of the stream is very low (1000 packets per second for a ~1.4 MBit 
@@ -121,13 +121,15 @@ TS file . Tsdec will print a PID statistics and will not decrypt.
 For debugging purposes you may want to raise the verbose level type -v 9. The 
 messages go to stderr not stdout. To log them into a file write 2>log.txt.
 
-The CWL file format
----------------------
+## The CWL file format
+
 Each line of the file contains either the even or the odd part of one cw.
+```
 0 00 00 00 00 00 00 00 00  # 12:00:00
 1 11 22 33 66 44 55 66 FF  # 12:00:10
 0 77 88 99 98 AA BB CC 31  # 12:00:20
 1 FF FF FF FD FF FF FF FD  # 12:00:30
+```
 Its important to always have an alternating parity sequence, otherwise tsdec 
 looses sync. If you write a cw logger, take care about the first cw change. You
 can not select the correct parity part of the first cw until you know which part
@@ -147,8 +149,8 @@ More infos (e.g. timezone, logging software,..) can be written into a comment
 line in the top of the cwl.
 
   
-Limitations, things to be done:
---------------------------------
+## Limitations, things to be done
+
 - the GUI version does only basic decryption and does not (yet) support the 
   additional features like constant CW, analyzing, blocker, verbose setting.
 - usage of the csa bitslice implementation (FFdecsa) of LIBDVBCSA for speed up.
